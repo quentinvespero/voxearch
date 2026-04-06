@@ -3,6 +3,8 @@ from pathlib import Path
 
 import mlx_whisper
 
+from src import ui
+
 from src.config import TRANSCRIPTION_MODEL
 
 
@@ -40,9 +42,9 @@ def transcribe(
     """
     cached = _is_hf_model_cached(model)
     if cached:
-        print(f"      Loading model {model} …")
+        ui.info(f"Loading model {model} …")
     else:
-        print(f"      Downloading model {model} (first run — this may take a few minutes) …")
+        ui.info(f"Downloading model {model} (first run — this may take a few minutes) …")
 
     # When the model is already cached, prevent huggingface_hub from making a
     # network request to check for updates (snapshot_download → api.repo_info

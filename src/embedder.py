@@ -3,6 +3,8 @@ from pathlib import Path
 
 from sentence_transformers import SentenceTransformer
 
+from src import ui
+
 from src.config import EMBEDDING_MODEL
 
 # Module-level cache so the model is only loaded once per process
@@ -24,9 +26,9 @@ def _get_model() -> SentenceTransformer:
     global _model
     if _model is None:
         if _is_hf_model_cached(EMBEDDING_MODEL):
-            print(f"      Loading embedding model {EMBEDDING_MODEL} …")
+            ui.info(f"Loading embedding model {EMBEDDING_MODEL} …")
         else:
-            print(f"      Downloading embedding model {EMBEDDING_MODEL} (~420 MB, first run) …")
+            ui.info(f"Downloading embedding model {EMBEDDING_MODEL} (~420 MB, first run) …")
         _model = SentenceTransformer(EMBEDDING_MODEL)
     return _model
 

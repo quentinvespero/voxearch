@@ -7,6 +7,8 @@ import json
 import subprocess
 import urllib.request
 
+from src import ui
+
 
 def get_installed_version() -> str:
     return importlib.metadata.version("yt-dlp")
@@ -20,16 +22,16 @@ def get_latest_pypi_version() -> str:
 
 def update_ytdlp() -> None:
     installed = get_installed_version()
-    print(f"Installed: yt-dlp {installed}")
+    ui.info(f"Installed: yt-dlp {installed}")
 
-    print("Checking PyPI for latest version...")
+    ui.info("Checking PyPI for latest version…")
     latest = get_latest_pypi_version()
-    print(f"Latest:    yt-dlp {latest}")
+    ui.info(f"Latest:    yt-dlp {latest}")
 
     if installed == latest:
-        print("Already up to date.")
+        ui.success("Already up to date.")
         return
 
-    print(f"\nUpgrading yt-dlp {installed} → {latest} ...")
+    ui.info(f"Upgrading yt-dlp {installed} → {latest} …")
     subprocess.run(["uv", "pip", "install", "--upgrade", "yt-dlp"], check=True)
-    print("Done.")
+    ui.success("Done.")

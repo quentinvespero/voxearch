@@ -11,7 +11,7 @@ import argparse
 
 from src.config import DB_PATH
 from src.database import sqlite_store, vector_store
-from src import embedder, updater
+from src import embedder, updater, ui
 from src.pipeline import ingest, INGEST_STEPS
 
 
@@ -21,37 +21,76 @@ def _cmd_update(_args: argparse.Namespace) -> None:
     updater.update_ytdlp()
 
 
-def _on_progress(event: dict) -> None:
-    status = event.get("status")
-    step   = event.get("step", "?")
-    total  = event.get("total", INGEST_STEPS)
-    label  = event.get("label", "")
-    detail = event.get("detail", "")
+class _ProgressHandler:
+    """Stateful rich progress handler for the ingest pipeline."""
 
-    if status == "running":
-        print(f"[{step}/{total}] {label} …")
-    elif status == "done":
-        print(f"      ✓ {detail}" if detail else "      ✓")
-    elif status == "skipped":
-        print(f"[skip] {detail}")
-    elif status == "complete":
-        print("\nDone!")
+    def __init__(self) -> None:
+        self._status   = None
+        self._title    = ""
+        self._segments = 0
+        self._vectors  = 0
+
+    def __call__(self, event: dict) -> None:
+        status = event.get("status")
+        step   = event.get("step", "?")
+        total  = event.get("total", INGEST_STEPS)
+        label  = event.get("label", "")
+        detail = event.get("detail", "")
+
+        if status == "running":
+            self._status = ui.console.status(
+                f"[bold cyan]\\[{step}/{total}][/bold cyan] {label}…"
+            )
+            self._status.start()
+
+        elif status == "done":
+            if self._status:
+                self._status.stop()
+                self._status = None
+            ui.success(detail)
+            # Collect data for the final summary panel.
+            # Keyed on label (not step number) so reordering pipeline steps
+            # doesn't silently corrupt the summary.
+            if label == "Downloading":
+                self._title = detail
+            elif label == "Indexing (SQLite)":
+                # "42 segments" → 42
+                try:
+                    self._segments = int(detail.split()[0])
+                except (ValueError, IndexError):
+                    pass
+            elif label == "Embedding (Qdrant)":
+                # "42 embeddings stored" → 42
+                try:
+                    self._vectors = int(detail.split()[0])
+                except (ValueError, IndexError):
+                    pass
+
+        elif status == "skipped":
+            ui.skip(detail)
+
+        elif status == "complete":
+            ui.ingest_panel(self._title, self._segments, self._vectors)
 
 
 def _cmd_ingest(args: argparse.Namespace) -> None:
-    ingest(args.url, language=args.language, force=args.force, initial_prompt=args.initial_prompt, on_progress=_on_progress)
+    ingest(
+        args.url,
+        language=args.language,
+        force=args.force,
+        initial_prompt=args.initial_prompt,
+        on_progress=_ProgressHandler(),
+    )
 
 
 def _cmd_search_keyword(args: argparse.Namespace) -> None:
     results = sqlite_store.search_keyword(DB_PATH, args.query, limit=args.limit)
 
     if not results:
-        print("No results found.")
+        ui.info("No results found.")
         return
 
-    for r in results:
-        print(f"\n[{r['source_title']}]  {r['start_time']:.1f}s – {r['end_time']:.1f}s")
-        print(f"  {r['text']}")
+    ui.result_table(results, show_score=False)
 
 
 def _cmd_search_semantic(args: argparse.Namespace) -> None:
@@ -60,15 +99,10 @@ def _cmd_search_semantic(args: argparse.Namespace) -> None:
     results      = vector_store.search_semantic(query_vector, limit=args.limit)
 
     if not results:
-        print("No results found.")
+        ui.info("No results found.")
         return
 
-    for r in results:
-        print(
-            f"\n[{r['source_title']}]  {r['start_time']:.1f}s – {r['end_time']:.1f}s"
-            f"  (similarity: {r['score']:.3f})"
-        )
-        print(f"  {r['text']}")
+    ui.result_table(results, show_score=True)
 
 
 # ── CLI definition ───────────────────────────────────────────────────────────
@@ -92,7 +126,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Download, transcribe, and index an audio URL",
     )
     ingest_p.add_argument(
-        "url", 
+        "url",
         help="YouTube, SoundCloud, or any yt-dlp-compatible URL"
     )
     ingest_p.add_argument(
