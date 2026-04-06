@@ -45,6 +45,15 @@ class IngestRequest(BaseModel):
     initial_prompt: str | None = None
 
 
+class Source(BaseModel):
+    id: int
+    title: str
+    url: str
+    description: str | None = None
+    status: str
+    added_at: str
+
+
 class SearchResult(BaseModel):
     id: int
     text: str
@@ -104,7 +113,7 @@ async def ingest_endpoint(body: IngestRequest):
 
 # ── Sources ───────────────────────────────────────────────────────────────────
 
-@app.get("/sources")
+@app.get("/sources", response_model=list[Source])
 async def sources_endpoint():
     """List all ingested sources, most recent first."""
     return sqlite_store.list_sources(DB_PATH)
