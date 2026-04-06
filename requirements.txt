@@ -14,6 +14,9 @@ uvicorn[standard]
 # Embedding model (multilingual MiniLM, ~420 MB first-time download)
 sentence-transformers
 
+# Terminal UX (colors, spinners, tables, panels)
+rich
+
 # ── System requirement (not pip-installable) ─────────────────────────────────
 # ffmpeg must be installed for yt-dlp to convert audio to MP3:
 #   brew install ffmpeg

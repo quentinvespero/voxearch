@@ -9,9 +9,9 @@ Usage:
 
 import argparse
 
-from src.config import DB_PATH
+from src.config import DB_PATH, TRANSCRIPTION_MODEL, EMBEDDING_MODEL
 from src.database import sqlite_store, vector_store
-from src import embedder, updater
+from src import embedder, updater, ui
 from src.pipeline import ingest, INGEST_STEPS
 
 
@@ -21,54 +21,94 @@ def _cmd_update(_args: argparse.Namespace) -> None:
     updater.update_ytdlp()
 
 
-def _on_progress(event: dict) -> None:
-    status = event.get("status")
-    step   = event.get("step", "?")
-    total  = event.get("total", INGEST_STEPS)
-    label  = event.get("label", "")
-    detail = event.get("detail", "")
+class _ProgressHandler:
+    """Stateful rich progress handler for the ingest pipeline."""
 
-    if status == "running":
-        print(f"[{step}/{total}] {label} …")
-    elif status == "done":
-        print(f"      ✓ {detail}" if detail else "      ✓")
-    elif status == "skipped":
-        print(f"[skip] {detail}")
-    elif status == "complete":
-        print("\nDone!")
+    def __init__(self) -> None:
+        self._status   = None
+        self._title    = ""
+        self._segments = 0
+        self._vectors  = 0
+
+    def __call__(self, event: dict) -> None:
+        status = event.get("status")
+        step   = event.get("step", "?")
+        total  = event.get("total", INGEST_STEPS)
+        label  = event.get("label", "")
+        detail = event.get("detail", "")
+
+        if status == "running":
+            self._status = ui.console.status(
+                f"[bold cyan]\\[{step}/{total}][/bold cyan] {label}…"
+            )
+            self._status.start()
+
+        elif status == "done":
+            if self._status:
+                self._status.stop()
+                self._status = None
+            ui.success(detail)
+            # Collect data for the final summary panel.
+            # Keyed on label (not step number) so reordering pipeline steps
+            # doesn't silently corrupt the summary.
+            if label == "Downloading":
+                self._title = detail
+            elif label == "Indexing (SQLite)":
+                # "42 segments" → 42
+                try:
+                    self._segments = int(detail.split()[0])
+                except (ValueError, IndexError):
+                    pass
+            elif label == "Embedding (Qdrant)":
+                # "42 embeddings stored" → 42
+                try:
+                    self._vectors = int(detail.split()[0])
+                except (ValueError, IndexError):
+                    pass
+
+        elif status == "skipped":
+            ui.skip(detail)
+
+        elif status == "complete":
+            ui.ingest_panel(self._title, self._segments, self._vectors)
 
 
 def _cmd_ingest(args: argparse.Namespace) -> None:
-    ingest(args.url, language=args.language, force=args.force, initial_prompt=args.initial_prompt, on_progress=_on_progress)
+    if not ui.preflight_model_check([TRANSCRIPTION_MODEL, EMBEDDING_MODEL], yes=args.yes):
+        ui.info("Aborted.")
+        return
+    ingest(
+        args.url,
+        language=args.language,
+        force=args.force,
+        initial_prompt=args.initial_prompt,
+        on_progress=_ProgressHandler(),
+    )
 
 
 def _cmd_search_keyword(args: argparse.Namespace) -> None:
     results = sqlite_store.search_keyword(DB_PATH, args.query, limit=args.limit)
 
     if not results:
-        print("No results found.")
+        ui.info("No results found.")
         return
 
-    for r in results:
-        print(f"\n[{r['source_title']}]  {r['start_time']:.1f}s – {r['end_time']:.1f}s")
-        print(f"  {r['text']}")
+    ui.result_table(results, show_score=False)
 
 
 def _cmd_search_semantic(args: argparse.Namespace) -> None:
+    if not ui.preflight_model_check([EMBEDDING_MODEL], yes=args.yes):
+        ui.info("Aborted.")
+        return
     # Embed the query with the same model used during ingest
     query_vector = embedder.embed_texts([args.query])[0]
     results      = vector_store.search_semantic(query_vector, limit=args.limit)
 
     if not results:
-        print("No results found.")
+        ui.info("No results found.")
         return
 
-    for r in results:
-        print(
-            f"\n[{r['source_title']}]  {r['start_time']:.1f}s – {r['end_time']:.1f}s"
-            f"  (similarity: {r['score']:.3f})"
-        )
-        print(f"  {r['text']}")
+    ui.result_table(results, show_score=True)
 
 
 # ── CLI definition ───────────────────────────────────────────────────────────
@@ -92,7 +132,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Download, transcribe, and index an audio URL",
     )
     ingest_p.add_argument(
-        "url", 
+        "url",
         help="YouTube, SoundCloud, or any yt-dlp-compatible URL"
     )
     ingest_p.add_argument(
@@ -112,20 +152,33 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Context hint for Whisper (e.g. 'React, TypeScript, serverless'). Improves recognition of domain-specific terms.",
     )
+    ingest_p.add_argument(
+        "--yes", "-y",
+        action="store_true",
+        default=False,
+        help="Skip model download confirmation prompt (useful for scripting).",
+    )
     ingest_p.set_defaults(func=_cmd_ingest)
 
     # ── search ────────────────────────────────────────────────────────────────
     search_p    = subparsers.add_parser("search", help="Search indexed transcripts")
     search_subs = search_p.add_subparsers(dest="search_type", required=True)
 
-    for name, help_text, func in [
-        ("keyword",  "Exact / full-text keyword search",  _cmd_search_keyword),
-        ("semantic", "Semantic similarity search",        _cmd_search_semantic),
-    ]:
-        p = search_subs.add_parser(name, help=help_text)
-        p.add_argument("query", help="Search query")
-        p.add_argument("--limit", type=int, default=10, help="Max results (default: 10)")
-        p.set_defaults(func=func)
+    keyword_p = search_subs.add_parser("keyword", help="Exact / full-text keyword search")
+    keyword_p.add_argument("query", help="Search query")
+    keyword_p.add_argument("--limit", type=int, default=10, help="Max results (default: 10)")
+    keyword_p.set_defaults(func=_cmd_search_keyword)
+
+    semantic_p = search_subs.add_parser("semantic", help="Semantic similarity search")
+    semantic_p.add_argument("query", help="Search query")
+    semantic_p.add_argument("--limit", type=int, default=10, help="Max results (default: 10)")
+    semantic_p.add_argument(
+        "--yes", "-y",
+        action="store_true",
+        default=False,
+        help="Skip model download confirmation prompt (useful for scripting).",
+    )
+    semantic_p.set_defaults(func=_cmd_search_semantic)
 
     return parser
 

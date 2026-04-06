@@ -1,16 +1,10 @@
 import os
-from pathlib import Path
 
 import mlx_whisper
 
+from src import ui
 from src.config import TRANSCRIPTION_MODEL
-
-
-def _is_hf_model_cached(hf_repo: str) -> bool:
-    """Return True if the HuggingFace model weights are already in the local cache."""
-    cache_dir = Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface")) / "hub"
-    cache_name = "models--" + hf_repo.replace("/", "--")
-    return (cache_dir / cache_name).exists()
+from src.utils import is_hf_model_cached
 
 
 def transcribe(
@@ -38,11 +32,11 @@ def transcribe(
           - end   (float): end time in seconds
           - text  (str):   transcribed text for that segment
     """
-    cached = _is_hf_model_cached(model)
+    cached = is_hf_model_cached(model)
     if cached:
-        print(f"      Loading model {model} …")
+        ui.info(f"Loading transcription model {model} …")
     else:
-        print(f"      Downloading model {model} (first run — this may take a few minutes) …")
+        ui.info(f"Downloading transcription model {model} (first run — this may take a few minutes) …")
 
     # When the model is already cached, prevent huggingface_hub from making a
     # network request to check for updates (snapshot_download → api.repo_info

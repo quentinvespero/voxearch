@@ -1,6 +1,8 @@
 import os
 import yt_dlp
 
+from src import ui
+
 
 def download_audio(url: str, output_dir: str, force: bool = False) -> dict:
     """
@@ -44,7 +46,7 @@ def download_audio(url: str, output_dir: str, force: bool = False) -> dict:
             raw_path = ydl.prepare_filename(info)
             expected_mp3 = os.path.splitext(raw_path)[0] + ".mp3"
             if os.path.isfile(expected_mp3):
-                print("      [cache] Audio file already on disk, skipping download.")
+                ui.info("[cache] Audio file already on disk, skipping download.")
                 return {
                     "title": info.get("title", "unknown"),
                     "url": url,
