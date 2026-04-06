@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## App Name
+
+**Voxearch**
+
 ## What This Project Does
 
 A **local audio transcription tool** that downloads audio from a URL (YouTube, podcast feeds, etc.), transcribes it using a local AI model, and stores the result in a database for later search.
@@ -34,6 +38,8 @@ Audio URL (YouTube, podcast RSS, etc.)
   → Qdrant (vector DB): store embeddings for semantic search
 ```
 
+The CLI pipeline is also exposed over HTTP via a FastAPI server (`src/server.py`), used by the macOS native Swift GUI. It streams progress as Server-Sent Events (SSE) and exposes search and source management endpoints.
+
 ### Key Technologies
 | Layer | Tool | Notes |
 |---|---|---|
@@ -41,7 +47,8 @@ Audio URL (YouTube, podcast RSS, etc.)
 | Transcription | mlx-whisper | Optimized for Apple Silicon via MLX |
 | Keyword search | SQLite FTS5 | Built into Python stdlib (`sqlite3`) |
 | Semantic search | Qdrant | Embedded (no Docker needed), stored in `data/qdrant_db/` |
-| Embeddings | TBD | A small multilingual model (e.g. `sentence-transformers`) |
+| Embeddings | sentence-transformers (`paraphrase-multilingual-MiniLM-L12-v2`) | 384-dim multilingual vectors, ~420 MB |
+| GUI API server | FastAPI + uvicorn | HTTP + SSE server wrapping the pipeline for the macOS native GUI (`src/server.py`) |
 
 ### SQLite Schema
 - **sources** — title, url, type (podcast/youtube/file), date added
