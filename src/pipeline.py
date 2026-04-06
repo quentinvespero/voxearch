@@ -54,7 +54,9 @@ def ingest(
 
     if force:
         # Wipe existing data so the pipeline runs fresh.
-        # Note: orphaned Qdrant points are not removed (acceptable for local use).
+        existing_id = sqlite_store.get_source_id_by_url(DB_PATH, url)
+        if existing_id is not None:
+            vector_store.delete_by_source_id(existing_id)
         sqlite_store.delete_source(DB_PATH, url)
 
     # ── 1. Download ──────────────────────────────────────────────────────────

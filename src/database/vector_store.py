@@ -1,5 +1,5 @@
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
+from qdrant_client.models import Distance, FieldCondition, Filter, MatchValue, PointStruct, VectorParams
 
 from src.config import EMBEDDING_DIMENSION, QDRANT_COLLECTION, QDRANT_PATH
 
@@ -55,6 +55,23 @@ def insert_segments(
         client.upsert(collection_name=QDRANT_COLLECTION, points=points[i : i + UPSERT_BATCH_SIZE])
 
 
+def delete_by_source_id(source_id: int) -> None:
+    """
+    Delete all Qdrant points whose payload matches source_id.
+    No-op if the collection does not exist yet.
+    """
+    client = _get_client()
+    existing = {c.name for c in client.get_collections().collections}
+    if QDRANT_COLLECTION not in existing:
+        return
+    client.delete(
+        collection_name=QDRANT_COLLECTION,
+        points_selector=Filter(
+            must=[FieldCondition(key="source_id", match=MatchValue(value=source_id))]
+        ),
+    )
+
+
 def search_semantic(query_vector: list[float], limit: int = 10) -> list[dict]:
     """
     Semantic similarity search: find the segments closest to the query vector.
@@ -69,4 +86,4 @@ def search_semantic(query_vector: list[float], limit: int = 10) -> list[dict]:
         query_vector=query_vector,
         limit=limit,
     )
-    return [{"score": hit.score, **hit.payload} for hit in hits]
+    return [{"id": hit.id, "score": hit.score, **hit.payload} for hit in hits]

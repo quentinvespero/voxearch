@@ -45,6 +45,17 @@ class IngestRequest(BaseModel):
     initial_prompt: str | None = None
 
 
+class SearchResult(BaseModel):
+    id: int
+    text: str
+    start_time: float
+    end_time: float
+    source_title: str
+    source_url: str
+    # Semantic search only — None for keyword results
+    score: float | None = None
+
+
 @app.post("/ingest")
 async def ingest_endpoint(body: IngestRequest):
     """
@@ -101,13 +112,13 @@ async def sources_endpoint():
 
 # ── Search ────────────────────────────────────────────────────────────────────
 
-@app.get("/search/keyword")
+@app.get("/search/keyword", response_model=list[SearchResult])
 async def search_keyword_endpoint(q: str = Query(..., min_length=1), limit: int = 10):
     """Full-text keyword search across all transcription segments."""
     return sqlite_store.search_keyword(DB_PATH, q, limit=limit)
 
 
-@app.get("/search/semantic")
+@app.get("/search/semantic", response_model=list[SearchResult])
 async def search_semantic_endpoint(q: str = Query(..., min_length=1), limit: int = 10):
     """Semantic similarity search using the same embedding model as ingest."""
     try:
@@ -122,8 +133,9 @@ async def search_semantic_endpoint(q: str = Query(..., min_length=1), limit: int
 
 @app.delete("/sources/{source_id}")
 async def delete_source_endpoint(source_id: int):
-    """Delete a source and all its segments by ID."""
+    """Delete a source and all its segments by ID (SQLite + Qdrant)."""
     deleted = sqlite_store.delete_source_by_id(DB_PATH, source_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Source not found")
+    vector_store.delete_by_source_id(source_id)
     return {"deleted": source_id}

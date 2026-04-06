@@ -107,6 +107,13 @@ def mark_source_complete(db_path: str, source_id: int) -> None:
         )
 
 
+def get_source_id_by_url(db_path: str, url: str) -> int | None:
+    """Return the source id for a given URL, or None if not found."""
+    with _connect(db_path) as conn:
+        row = conn.execute("SELECT id FROM sources WHERE url = ?", (url,)).fetchone()
+    return row["id"] if row else None
+
+
 def delete_source(db_path: str, url: str) -> None:
     """
     Delete a source and all its segments by URL.
@@ -185,8 +192,7 @@ def search_keyword(db_path: str, query: str, limit: int = 10) -> list[dict]:
                 s.end_time,
                 s.text,
                 src.title AS source_title,
-                src.url   AS source_url,
-                rank
+                src.url   AS source_url
             FROM segments_fts
             JOIN segments s   ON segments_fts.rowid = s.id
             JOIN sources  src ON s.source_id = src.id
