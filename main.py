@@ -9,7 +9,7 @@ Usage:
 
 import argparse
 
-from src.config import DB_PATH
+from src.config import DB_PATH, TRANSCRIPTION_MODEL, EMBEDDING_MODEL
 from src.database import sqlite_store, vector_store
 from src import embedder, updater, ui
 from src.pipeline import ingest, INGEST_STEPS
@@ -74,6 +74,9 @@ class _ProgressHandler:
 
 
 def _cmd_ingest(args: argparse.Namespace) -> None:
+    if not ui.preflight_model_check([TRANSCRIPTION_MODEL, EMBEDDING_MODEL], yes=args.yes):
+        ui.info("Aborted.")
+        return
     ingest(
         args.url,
         language=args.language,
@@ -94,6 +97,9 @@ def _cmd_search_keyword(args: argparse.Namespace) -> None:
 
 
 def _cmd_search_semantic(args: argparse.Namespace) -> None:
+    if not ui.preflight_model_check([EMBEDDING_MODEL], yes=args.yes):
+        ui.info("Aborted.")
+        return
     # Embed the query with the same model used during ingest
     query_vector = embedder.embed_texts([args.query])[0]
     results      = vector_store.search_semantic(query_vector, limit=args.limit)
@@ -110,6 +116,12 @@ def _cmd_search_semantic(args: argparse.Namespace) -> None:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Transcribe audio and search transcripts"
+    )
+    parser.add_argument(
+        "--yes", "-y",
+        action="store_true",
+        default=False,
+        help="Skip download confirmation prompts (useful for scripting).",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 

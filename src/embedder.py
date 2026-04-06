@@ -1,35 +1,33 @@
 import os
-from pathlib import Path
 
 from sentence_transformers import SentenceTransformer
 
-from src import ui
-
 from src.config import EMBEDDING_MODEL
+from src.utils import is_hf_model_cached
 
 # Module-level cache so the model is only loaded once per process
 _model: SentenceTransformer | None = None
 
 
-def _is_hf_model_cached(hf_repo: str) -> bool:
-    """Return True if the HuggingFace model weights are already in the local cache."""
-    cache_dir = Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface")) / "hub"
-    # sentence-transformers stores models under "sentence-transformers" org on HF
-    for name in [hf_repo, f"sentence-transformers/{hf_repo}"]:
-        cache_name = "models--" + name.replace("/", "--")
-        if (cache_dir / cache_name).exists():
-            return True
-    return False
-
-
 def _get_model() -> SentenceTransformer:
     global _model
     if _model is None:
-        if _is_hf_model_cached(EMBEDDING_MODEL):
-            ui.info(f"Loading embedding model {EMBEDDING_MODEL} …")
-        else:
-            ui.info(f"Downloading embedding model {EMBEDDING_MODEL} (~420 MB, first run) …")
-        _model = SentenceTransformer(EMBEDDING_MODEL)
+        cached = is_hf_model_cached(EMBEDDING_MODEL)
+
+        # When the model is already cached, prevent huggingface_hub from making a
+        # network request to check for updates (can hang even with a complete cache).
+        _prev = os.environ.get("HF_HUB_OFFLINE")
+        if cached:
+            os.environ["HF_HUB_OFFLINE"] = "1"
+
+        try:
+            _model = SentenceTransformer(EMBEDDING_MODEL)
+        finally:
+            if _prev is None:
+                os.environ.pop("HF_HUB_OFFLINE", None)
+            else:
+                os.environ["HF_HUB_OFFLINE"] = _prev
+
     return _model
 
 
