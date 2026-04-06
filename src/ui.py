@@ -84,15 +84,16 @@ def preflight_model_check(models: list[str], yes: bool = False) -> bool:
         True  → caller should proceed.
         False → user declined; caller should abort.
     """
-    missing = [m for m in models if not is_hf_model_cached(m)]
+    cached_status = {m: is_hf_model_cached(m) for m in models}
+    missing = [m for m, cached in cached_status.items() if not cached]
     if not missing:
         # All cached — silent fast-path, no output
         return True
 
     console.print()
     console.print("[bold]Model pre-flight check[/bold]")
-    for m in models:
-        if is_hf_model_cached(m):
+    for m, cached in cached_status.items():
+        if cached:
             console.print(f"  [green]✓[/green] [dim]{m}  (cached)[/dim]")
         else:
             size = MODEL_SIZE_HINTS.get(m, "size unknown")

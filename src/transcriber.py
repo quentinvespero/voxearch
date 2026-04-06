@@ -2,6 +2,7 @@ import os
 
 import mlx_whisper
 
+from src import ui
 from src.config import TRANSCRIPTION_MODEL
 from src.utils import is_hf_model_cached
 
@@ -32,6 +33,10 @@ def transcribe(
           - text  (str):   transcribed text for that segment
     """
     cached = is_hf_model_cached(model)
+    if cached:
+        ui.info(f"Loading transcription model {model} …")
+    else:
+        ui.info(f"Downloading transcription model {model} (first run — this may take a few minutes) …")
 
     # When the model is already cached, prevent huggingface_hub from making a
     # network request to check for updates (snapshot_download → api.repo_info
