@@ -117,12 +117,6 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Transcribe audio and search transcripts"
     )
-    parser.add_argument(
-        "--yes", "-y",
-        action="store_true",
-        default=False,
-        help="Skip download confirmation prompts (useful for scripting).",
-    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # ── update ───────────────────────────────────────────────────────────────
@@ -158,20 +152,33 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Context hint for Whisper (e.g. 'React, TypeScript, serverless'). Improves recognition of domain-specific terms.",
     )
+    ingest_p.add_argument(
+        "--yes", "-y",
+        action="store_true",
+        default=False,
+        help="Skip model download confirmation prompt (useful for scripting).",
+    )
     ingest_p.set_defaults(func=_cmd_ingest)
 
     # ── search ────────────────────────────────────────────────────────────────
     search_p    = subparsers.add_parser("search", help="Search indexed transcripts")
     search_subs = search_p.add_subparsers(dest="search_type", required=True)
 
-    for name, help_text, func in [
-        ("keyword",  "Exact / full-text keyword search",  _cmd_search_keyword),
-        ("semantic", "Semantic similarity search",        _cmd_search_semantic),
-    ]:
-        p = search_subs.add_parser(name, help=help_text)
-        p.add_argument("query", help="Search query")
-        p.add_argument("--limit", type=int, default=10, help="Max results (default: 10)")
-        p.set_defaults(func=func)
+    keyword_p = search_subs.add_parser("keyword", help="Exact / full-text keyword search")
+    keyword_p.add_argument("query", help="Search query")
+    keyword_p.add_argument("--limit", type=int, default=10, help="Max results (default: 10)")
+    keyword_p.set_defaults(func=_cmd_search_keyword)
+
+    semantic_p = search_subs.add_parser("semantic", help="Semantic similarity search")
+    semantic_p.add_argument("query", help="Search query")
+    semantic_p.add_argument("--limit", type=int, default=10, help="Max results (default: 10)")
+    semantic_p.add_argument(
+        "--yes", "-y",
+        action="store_true",
+        default=False,
+        help="Skip model download confirmation prompt (useful for scripting).",
+    )
+    semantic_p.set_defaults(func=_cmd_search_semantic)
 
     return parser
 
