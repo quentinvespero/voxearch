@@ -7,6 +7,10 @@ mlx-whisper
 # Vector database client
 qdrant-client
 
+# HTTP server for the GUI backend
+fastapi
+uvicorn[standard]
+
 # Embedding model (multilingual MiniLM, ~420 MB first-time download)
 sentence-transformers
 

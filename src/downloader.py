@@ -10,9 +10,10 @@ def download_audio(url: str, output_dir: str, force: bool = False) -> dict:
     and the cached file is returned immediately.
 
     Returns a dict with:
-      - title (str): human-readable title from the source
-      - url   (str): original URL
-      - file_path (str): path to the downloaded .mp3 file
+      - title       (str):      human-readable title from the source
+      - url         (str):      original URL
+      - file_path   (str):      path to the downloaded .mp3 file
+      - description (str|None): episode/video description, if available
     """
     os.makedirs(output_dir, exist_ok=True)
 
@@ -48,6 +49,7 @@ def download_audio(url: str, output_dir: str, force: bool = False) -> dict:
                     "title": info.get("title", "unknown"),
                     "url": url,
                     "file_path": expected_mp3,
+                    "description": info.get("description"),
                 }
 
         info = ydl.extract_info(url, download=True)
@@ -61,4 +63,5 @@ def download_audio(url: str, output_dir: str, force: bool = False) -> dict:
         "title": info.get("title", "unknown"),
         "url": url,
         "file_path": file_path,
+        "description": info.get("description"),
     }

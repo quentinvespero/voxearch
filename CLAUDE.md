@@ -80,5 +80,24 @@ A `PROGRESS.md` file at the root tracks the status of each pipeline step and a m
 
 **Do not** update it for minor fixes, refactors, or work-in-progress changes.
 
+### Keeping COMMANDS.md up to date
+
+`COMMANDS.md` lists all CLI commands and their options for quick reference.
+
+**Update it when:**
+- A new subcommand is added to `main.py`
+- An argument is added, removed, or renamed on an existing command
+
+**Do not** update it for internal changes that don't affect the CLI interface.
+
+### Keeping CLAUDE.md up to date
+
+Update `CLAUDE.md` when:
+- A new key technology is added or an existing one is replaced (e.g. switching transcription backend, adding an embeddings model)
+- The data flow or architecture changes meaningfully (new pipeline step, removed step, schema change)
+- The target environment or platform assumptions change
+
+**Do not** update it for implementation details, bug fixes, or refactors that don't affect the architecture or stack.
+
 ## Gitignored Paths
 Audio files (`.mp3`, `.wav`), model weights, the `whisper.cpp` submodule, and the `data/` directory are gitignored and must be set up locally.

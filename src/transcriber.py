@@ -57,8 +57,7 @@ def transcribe(
             path_or_hf_repo=model,
             language=language,
             initial_prompt=initial_prompt,
-            # verbose=True prints each segment as it is decoded — useful progress indicator
-            verbose=True,
+            verbose=False,
             # word_timestamps adds overhead and we don't need them
             word_timestamps=False,
         )

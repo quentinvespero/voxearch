@@ -34,11 +34,12 @@ def init_db(db_path: str) -> None:
     with _connect(db_path) as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS sources (
-                id       INTEGER PRIMARY KEY AUTOINCREMENT,
-                title    TEXT    NOT NULL,
-                url      TEXT    UNIQUE NOT NULL,
-                status   TEXT    NOT NULL DEFAULT 'pending',
-                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                id          INTEGER   PRIMARY KEY AUTOINCREMENT,
+                title       TEXT      NOT NULL,
+                url         TEXT      UNIQUE NOT NULL,
+                description TEXT,
+                status      TEXT      NOT NULL DEFAULT 'pending',
+                added_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
             CREATE TABLE IF NOT EXISTS segments (
@@ -79,6 +80,12 @@ def init_db(db_path: str) -> None:
         except sqlite3.OperationalError:
             pass  # column already exists
 
+        # Migration: add description column to existing databases that predate it
+        try:
+            conn.execute("ALTER TABLE sources ADD COLUMN description TEXT")
+        except sqlite3.OperationalError:
+            pass  # column already exists
+
 
 def get_source_status(db_path: str, url: str) -> str | None:
     """
@@ -100,6 +107,13 @@ def mark_source_complete(db_path: str, source_id: int) -> None:
         )
 
 
+def get_source_id_by_url(db_path: str, url: str) -> int | None:
+    """Return the source id for a given URL, or None if not found."""
+    with _connect(db_path) as conn:
+        row = conn.execute("SELECT id FROM sources WHERE url = ?", (url,)).fetchone()
+    return row["id"] if row else None
+
+
 def delete_source(db_path: str, url: str) -> None:
     """
     Delete a source and all its segments by URL.
@@ -110,15 +124,26 @@ def delete_source(db_path: str, url: str) -> None:
         conn.execute("DELETE FROM sources WHERE url = ?", (url,))
 
 
-def insert_source(db_path: str, title: str, url: str) -> int:
+def delete_source_by_id(db_path: str, source_id: int) -> bool:
+    """
+    Delete a source and all its segments by ID.
+    Returns True if a row was deleted, False if the ID was not found.
+    Note: corresponding Qdrant points are NOT cleaned up here.
+    """
+    with _connect(db_path) as conn:
+        cursor = conn.execute("DELETE FROM sources WHERE id = ?", (source_id,))
+        return cursor.rowcount > 0
+
+
+def insert_source(db_path: str, title: str, url: str, description: str | None = None) -> int:
     """
     Insert a source row (or ignore if URL already exists).
     Returns the source id in either case.
     """
     with _connect(db_path) as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO sources (title, url) VALUES (?, ?)",
-            (title, url),
+            "INSERT OR IGNORE INTO sources (title, url, description) VALUES (?, ?, ?)",
+            (title, url, description),
         )
         row = conn.execute("SELECT id FROM sources WHERE url = ?", (url,)).fetchone()
         return row["id"]
@@ -141,6 +166,16 @@ def insert_segments(db_path: str, source_id: int, segments: list[dict]) -> list[
         return ids
 
 
+def list_sources(db_path: str) -> list[dict]:
+    """Return all sources ordered by most recently added first."""
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT id, title, url, description, status, added_at"
+            " FROM sources ORDER BY added_at DESC"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
 def search_keyword(db_path: str, query: str, limit: int = 10) -> list[dict]:
     """
     Full-text search across all segments.
@@ -157,8 +192,7 @@ def search_keyword(db_path: str, query: str, limit: int = 10) -> list[dict]:
                 s.end_time,
                 s.text,
                 src.title AS source_title,
-                src.url   AS source_url,
-                rank
+                src.url   AS source_url
             FROM segments_fts
             JOIN segments s   ON segments_fts.rowid = s.id
             JOIN sources  src ON s.source_id = src.id

@@ -1,4 +1,5 @@
 import os
+from collections.abc import Callable
 
 from src import downloader, embedder, transcriber
 from src.config import AUDIO_DIR, DB_PATH
@@ -6,7 +7,16 @@ from src.database import sqlite_store, vector_store
 from src.utils import normalize_url
 
 
-def ingest(url: str, language: str | None = None, force: bool = False, initial_prompt: str | None = None) -> None:
+INGEST_STEPS = 4
+
+
+def ingest(
+    url: str,
+    language: str | None = None,
+    force: bool = False,
+    initial_prompt: str | None = None,
+    on_progress: Callable[[dict], None] = lambda _: None,
+) -> None:
     """
     Full ingest pipeline for a single audio URL:
       1. Download audio via yt-dlp
@@ -21,6 +31,11 @@ def ingest(url: str, language: str | None = None, force: bool = False, initial_p
         force:          Re-download and re-transcribe even if already processed.
         initial_prompt: Optional context hint for Whisper (e.g. "React, TypeScript").
                         See transcriber.transcribe() for details.
+        on_progress:    Callback receiving structured progress dicts. Shape:
+                          {"step": int, "total": int, "label": str, "status": "running"|"done", "detail": str}
+                          {"status": "skipped", "detail": str}
+                          {"status": "complete"}
+                        Defaults to a no-op so the function is safe to call without a callback.
     """
     url = normalize_url(url)
 
@@ -34,32 +49,34 @@ def ingest(url: str, language: str | None = None, force: bool = False, initial_p
     if not force:
         status = sqlite_store.get_source_status(DB_PATH, url)
         if status == "complete":
-            print(f"[skip] {url} already ingested. Use --force to re-process.")
+            on_progress({"status": "skipped", "detail": f"{url} already ingested. Use --force to re-process."})
             return
 
     if force:
         # Wipe existing data so the pipeline runs fresh.
-        # Note: orphaned Qdrant points are not removed (acceptable for local use).
+        existing_id = sqlite_store.get_source_id_by_url(DB_PATH, url)
+        if existing_id is not None:
+            vector_store.delete_by_source_id(existing_id)
         sqlite_store.delete_source(DB_PATH, url)
 
     # ── 1. Download ──────────────────────────────────────────────────────────
-    print(f"[1/4] Downloading audio from {url} …")
+    on_progress({"step": 1, "total": INGEST_STEPS, "label": "Downloading", "status": "running"})
     audio_info = downloader.download_audio(url, AUDIO_DIR, force=force)
-    print(f"      ✓ {audio_info['title']}")
+    on_progress({"step": 1, "total": INGEST_STEPS, "label": "Downloading", "status": "done", "detail": audio_info["title"]})
 
     # ── 2. Transcribe ────────────────────────────────────────────────────────
-    print("[2/4] Transcribing …")
+    on_progress({"step": 2, "total": INGEST_STEPS, "label": "Transcribing", "status": "running"})
     segments = transcriber.transcribe(audio_info["file_path"], language=language, initial_prompt=initial_prompt)
-    print(f"      ✓ {len(segments)} segments")
+    on_progress({"step": 2, "total": INGEST_STEPS, "label": "Transcribing", "status": "done", "detail": f"{len(segments)} segments"})
 
     # ── 3. SQLite ────────────────────────────────────────────────────────────
-    print("[3/4] Storing in SQLite …")
-    source_id   = sqlite_store.insert_source(DB_PATH, audio_info["title"], url)
+    on_progress({"step": 3, "total": INGEST_STEPS, "label": "Indexing (SQLite)", "status": "running"})
+    source_id   = sqlite_store.insert_source(DB_PATH, audio_info["title"], url, audio_info["description"])
     segment_ids = sqlite_store.insert_segments(DB_PATH, source_id, segments)
-    print(f"      ✓ source_id={source_id}, {len(segment_ids)} segments")
+    on_progress({"step": 3, "total": INGEST_STEPS, "label": "Indexing (SQLite)", "status": "done", "detail": f"{len(segment_ids)} segments"})
 
     # ── 4. Qdrant ────────────────────────────────────────────────────────────
-    print("[4/4] Generating embeddings and storing in Qdrant …")
+    on_progress({"step": 4, "total": INGEST_STEPS, "label": "Embedding (Qdrant)", "status": "running"})
     texts    = [s["text"] for s in segments]
     vectors  = embedder.embed_texts(texts)
     payloads = [
@@ -74,7 +91,7 @@ def ingest(url: str, language: str | None = None, force: bool = False, initial_p
         for s in segments
     ]
     vector_store.insert_segments(segment_ids, vectors, payloads)
-    print(f"      ✓ {len(segment_ids)} embeddings stored")
+    on_progress({"step": 4, "total": INGEST_STEPS, "label": "Embedding (Qdrant)", "status": "done", "detail": f"{len(segment_ids)} embeddings stored"})
 
     sqlite_store.mark_source_complete(DB_PATH, source_id)
-    print("\nDone!")
+    on_progress({"status": "complete"})
