@@ -8,6 +8,8 @@ Usage:
 """
 
 import argparse
+import sys
+from pathlib import Path
 
 from src.config import DB_PATH, TRANSCRIPTION_MODEL, EMBEDDING_MODEL
 from src.database import sqlite_store, vector_store
@@ -77,11 +79,24 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
     if not ui.preflight_model_check([TRANSCRIPTION_MODEL, EMBEDDING_MODEL], yes=args.yes):
         ui.info("Aborted.")
         return
+
+    # Read prompt file if provided
+    file_prompt = None
+    if args.prompt_file:
+        path = Path(args.prompt_file)
+        if not path.exists():
+            print(f"Error: prompt file not found: {path}", file=sys.stderr)
+            sys.exit(1)
+        file_prompt = path.read_text(encoding="utf-8").strip()
+
+    # Merge file content and inline prompt (both optional)
+    initial_prompt = "\n".join(filter(None, [file_prompt, args.initial_prompt])) or None
+
     ingest(
         args.url,
         language=args.language,
         force=args.force,
-        initial_prompt=args.initial_prompt,
+        initial_prompt=initial_prompt,
         on_progress=_ProgressHandler(),
     )
 
@@ -151,6 +166,13 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="initial_prompt",
         default=None,
         help="Context hint for Whisper (e.g. 'React, TypeScript, serverless'). Improves recognition of domain-specific terms.",
+    )
+    ingest_p.add_argument(
+        "--prompt-file", "-P",
+        dest="prompt_file",
+        metavar="FILE",
+        default=None,
+        help="Path to a text file used as context hint for Whisper. Merged with --prompt if both are provided.",
     )
     ingest_p.add_argument(
         "--yes", "-y",
