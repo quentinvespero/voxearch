@@ -15,6 +15,7 @@ from src.config import DB_PATH, TRANSCRIPTION_MODEL, EMBEDDING_MODEL
 from src.database import sqlite_store, vector_store
 from src import embedder, updater, ui
 from src.pipeline import ingest, INGEST_STEPS
+from src.downloader import fetch_playlist_entries
 
 
 # ── Command handlers ─────────────────────────────────────────────────────────
@@ -92,13 +93,36 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
     # Merge file content and inline prompt (both optional)
     initial_prompt = "\n".join(filter(None, [file_prompt, args.initial_prompt])) or None
 
-    ingest(
-        args.url,
-        language=args.language,
-        force=args.force,
-        initial_prompt=initial_prompt,
-        on_progress=_ProgressHandler(),
-    )
+    # ── Playlist / feed detection ─────────────────────────────────────────────
+    entries = fetch_playlist_entries(args.url)
+
+    if entries is None:
+        # Single item — original behaviour unchanged
+        urls_to_process = [args.url]
+    else:
+        if args.yes:
+            # --yes / -y skips interactive prompts: select all automatically
+            selected_indices = list(range(len(entries)))
+        else:
+            selected_indices = ui.prompt_playlist_selection(entries)
+            if selected_indices is None:
+                ui.info("Aborted.")
+                return
+        urls_to_process = [entries[i]["url"] for i in selected_indices]
+
+    # ── Process each URL ──────────────────────────────────────────────────────
+    for i, url in enumerate(urls_to_process, start=1):
+        if len(urls_to_process) > 1:
+            ui.console.print(
+                f"\n[bold cyan][{i}/{len(urls_to_process)}][/bold cyan] Processing…"
+            )
+        ingest(
+            url,
+            language=args.language,
+            force=args.force,
+            initial_prompt=initial_prompt,
+            on_progress=_ProgressHandler(),
+        )
 
 
 def _cmd_search_keyword(args: argparse.Namespace) -> None:

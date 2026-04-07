@@ -104,6 +104,96 @@ def preflight_model_check(models: list[str], yes: bool = False) -> bool:
     return confirm("Proceed with download?", default=False)
 
 
+def parse_selection(raw: str, count: int) -> list[int] | None:
+    """
+    Parse a user selection string into a sorted list of 0-based indices.
+
+    Accepts: "all", "1", "1,3", "2-5", "1,3-5,7" (1-based input).
+    Returns None if the input is invalid or out of range.
+    """
+    raw = raw.strip().lower()
+    if raw == "all":
+        return list(range(count))
+
+    indices: set[int] = set()
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        if "-" in token:
+            parts = token.split("-", 1)
+            try:
+                lo, hi = int(parts[0]), int(parts[1])
+            except ValueError:
+                return None
+            if lo < 1 or hi > count or lo > hi:
+                return None
+            indices.update(range(lo - 1, hi))  # convert to 0-based
+        else:
+            try:
+                n = int(token)
+            except ValueError:
+                return None
+            if n < 1 or n > count:
+                return None
+            indices.add(n - 1)  # convert to 0-based
+
+    if not indices:
+        return None
+    return sorted(indices)
+
+
+def prompt_playlist_selection(entries: list[dict]) -> list[int] | None:
+    """
+    Display a numbered table of playlist entries and prompt the user to select.
+
+    Accepts: "all", comma-separated numbers, ranges, or combinations.
+    Returns a sorted list of 0-based indices, or None if the user aborted.
+    """
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
+    table.add_column("#",        style="dim",  no_wrap=True, justify="right")
+    table.add_column("Title",    style="cyan")
+    table.add_column("Duration", style="dim",  no_wrap=True, justify="right")
+
+    for i, entry in enumerate(entries, start=1):
+        dur = entry.get("duration")
+        if dur is not None:
+            mins, secs = divmod(int(dur), 60)
+            dur_str = f"{mins}:{secs:02d}"
+        else:
+            dur_str = "—"
+        table.add_row(str(i), entry["title"], dur_str)
+
+    console.print()
+    console.print(table)
+    console.print(
+        f"  [bold]{len(entries)} items found.[/bold]  "
+        "Select items ([cyan]all[/cyan], [cyan]1,3[/cyan], [cyan]2-5[/cyan], [cyan]1,3-5,7[/cyan]):"
+    )
+
+    while True:
+        console.print("  > ", end="")
+        try:
+            raw = input().strip()
+        except (EOFError, KeyboardInterrupt):
+            console.print()
+            return None
+
+        if not raw:
+            console.print("  [yellow]No selection entered. Try again or press Ctrl+C to abort.[/yellow]")
+            continue
+
+        indices = parse_selection(raw, len(entries))
+        if indices is None:
+            console.print(
+                f"  [red]Invalid selection.[/red] Use numbers 1–{len(entries)}, "
+                "ranges like 2-5, or 'all'."
+            )
+            continue
+
+        return indices
+
+
 def ingest_panel(title: str, segments: int, vectors: int) -> None:
     """Render a summary panel at the end of a successful ingest."""
     body = (

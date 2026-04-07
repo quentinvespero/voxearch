@@ -4,6 +4,38 @@ import yt_dlp
 from src import ui
 
 
+def fetch_playlist_entries(url: str) -> list[dict] | None:
+    """
+    Check whether *url* points to a playlist or feed.
+
+    Returns None if the URL resolves to a single item, or a list of entry
+    dicts (keys: id, title, url, duration) if it is a playlist/feed.
+    Uses extract_flat mode — no audio is downloaded.
+    """
+    ydl_opts = {
+        "extract_flat": "in_playlist",
+        "quiet": True,
+        "no_warnings": True,
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+
+    entries = info.get("entries")
+    if not entries:
+        return None
+
+    result = []
+    for entry in entries:
+        result.append({
+            "id":       entry.get("id", ""),
+            "title":    entry.get("title") or entry.get("id") or "Untitled",
+            # With extract_flat, "url" is the per-item URL suitable for ingest()
+            "url":      entry.get("url") or entry.get("webpage_url", ""),
+            "duration": entry.get("duration"),
+        })
+    return result
+
+
 def download_audio(url: str, output_dir: str, force: bool = False) -> dict:
     """
     Download audio from a URL using yt-dlp and convert it to MP3.
