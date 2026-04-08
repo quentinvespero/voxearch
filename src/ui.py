@@ -5,9 +5,20 @@ All user-facing output goes through this module so that rich's Console,
 spinners, and plain prints share the same stream and don't interfere.
 """
 
+import sys
+import os
+import shutil
+import tty
+import termios
+import select
+from contextlib import contextmanager
+
+from io import StringIO
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 from rich import box
 
 from src.config import MODEL_SIZE_HINTS
@@ -104,94 +115,165 @@ def preflight_model_check(models: list[str], yes: bool = False) -> bool:
     return confirm("Proceed with download?", default=False)
 
 
-def parse_selection(raw: str, count: int) -> list[int] | None:
+@contextmanager
+def _raw_terminal():
     """
-    Parse a user selection string into a sorted list of 0-based indices.
-
-    Accepts: "all", "1", "1,3", "2-5", "1,3-5,7" (1-based input).
-    Returns None if the input is invalid or out of range.
+    Put stdin in cbreak mode: character-by-character input, no echo,
+    but output processing kept ON so \\n → \\r\\n still works (no layout drift).
     """
-    raw = raw.strip().lower()
-    if raw == "all":
-        return list(range(count))
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)
+        yield
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
-    indices: set[int] = set()
-    for token in raw.split(","):
-        token = token.strip()
-        if not token:
-            continue
-        if "-" in token:
-            parts = token.split("-", 1)
-            try:
-                lo, hi = int(parts[0]), int(parts[1])
-            except ValueError:
-                return None
-            if lo < 1 or hi > count or lo > hi:
-                return None
-            indices.update(range(lo - 1, hi))  # convert to 0-based
+
+def _read_key() -> str:
+    """Read one keypress (handles multi-byte escape sequences for arrow keys)."""
+    fd = sys.stdin.fileno()
+    # Use os.read() directly to bypass Python's buffered text wrapper —
+    # select.select() checks the OS-level fd, so both must operate on the same layer
+    ch = os.read(fd, 1).decode("utf-8", errors="replace")
+    if ch == "\x1b":
+        # Short timeout distinguishes bare Escape (no bytes follow) from arrow keys (\x1b[A)
+        if select.select([fd], [], [], 0.05)[0]:
+            ch += os.read(fd, 1).decode("utf-8", errors="replace")
+            if select.select([fd], [], [], 0.05)[0]:
+                ch += os.read(fd, 1).decode("utf-8", errors="replace")
+    return ch
+
+
+def _build_table(
+    entries: list[dict],
+    cursor: int,
+    selected: set[int],
+    view_start: int = 0,
+    view_end: int | None = None,
+) -> Table:
+    """Render a slice of entries as a Rich Table, with scroll indicators."""
+    if view_end is None:
+        view_end = len(entries)
+
+    table = Table(box=box.SIMPLE, show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("",        no_wrap=True, justify="center")  # checkbox
+    table.add_column("Title")
+    table.add_column("Duration", style="dim", no_wrap=True, justify="right")
+
+    # "more above" indicator
+    if view_start > 0:
+        table.add_row("", Text(f"↑ {view_start} more", style="dim"), "")
+
+    for i in range(view_start, view_end):
+        entry  = entries[i]
+        dur    = entry.get("duration")
+        dur_str = f"{int(dur) // 60}:{int(dur) % 60:02d}" if dur is not None else "—"
+
+        if i == cursor:
+            style = "bold cyan"
+            check = Text("✓" if i in selected else " ", style=f"{style} on blue")
+            table.add_row(check, Text(entry["title"], style=style), Text(dur_str, style=style))
         else:
-            try:
-                n = int(token)
-            except ValueError:
-                return None
-            if n < 1 or n > count:
-                return None
-            indices.add(n - 1)  # convert to 0-based
+            checkbox = "[bold green]✓[/bold green]" if i in selected else "[ ]"
+            table.add_row(checkbox, Text(entry["title"]), dur_str)
 
-    if not indices:
-        return None
-    return sorted(indices)
+    # "more below" indicator
+    remaining = len(entries) - view_end
+    if remaining > 0:
+        table.add_row("", Text(f"↓ {remaining} more", style="dim"), "")
+
+    return table
 
 
 def prompt_playlist_selection(entries: list[dict]) -> list[int] | None:
     """
-    Display a numbered table of playlist entries and prompt the user to select.
-
-    Accepts: "all", comma-separated numbers, ranges, or combinations.
-    Returns a sorted list of 0-based indices, or None if the user aborted.
+    Interactive checkbox list: navigate with arrow keys, toggle with Space,
+    confirm with Enter. Returns sorted 0-based indices, or None if aborted.
     """
-    table = Table(box=box.SIMPLE, show_header=True, header_style="bold")
-    table.add_column("#",        style="dim",  no_wrap=True, justify="right")
-    table.add_column("Title",    style="cyan")
-    table.add_column("Duration", style="dim",  no_wrap=True, justify="right")
+    cursor   = 0
+    selected: set[int] = set()
+    count    = len(entries)
+    lines_printed = 0
 
-    for i, entry in enumerate(entries, start=1):
-        dur = entry.get("duration")
-        if dur is not None:
-            mins, secs = divmod(int(dur), 60)
-            dur_str = f"{mins}:{secs:02d}"
-        else:
-            dur_str = "—"
-        table.add_row(str(i), entry["title"], dur_str)
+    # Viewport: show only as many rows as fit in the terminal
+    terminal_h  = shutil.get_terminal_size().lines
+    max_visible = max(3, terminal_h - 6)  # leave room for header, hint, and some margin
+    view_top    = 0  # index of first visible entry
 
-    console.print()
-    console.print(table)
-    console.print(
-        f"  [bold]{len(entries)} items found.[/bold]  "
-        "Select items ([cyan]all[/cyan], [cyan]1,3[/cyan], [cyan]2-5[/cyan], [cyan]1,3-5,7[/cyan]):"
+    def adjust_viewport():
+        nonlocal view_top
+        if cursor < view_top:
+            view_top = cursor
+        elif cursor >= view_top + max_visible:
+            view_top = cursor - max_visible + 1
+
+    hint = Text.from_markup(
+        "  [dim]↑↓ navigate   "
+        "[bold]SPACE[/bold] toggle   "
+        "[bold]A[/bold] select all   "
+        "[bold]ENTER[/bold] confirm   "
+        "[bold]Q[/bold] abort[/dim]"
     )
 
-    while True:
-        console.print("  > ", end="")
-        try:
-            raw = input().strip()
-        except (EOFError, KeyboardInterrupt):
-            console.print()
-            return None
+    def rerender():
+        nonlocal lines_printed
+        adjust_viewport()
+        view_end = min(view_top + max_visible, count)
+        table = _build_table(entries, cursor, selected, view_top, view_end)
 
-        if not raw:
-            console.print("  [yellow]No selection entered. Try again or press Ctrl+C to abort.[/yellow]")
-            continue
+        # Measure how many lines this render will produce (no ANSI codes, same line count)
+        buf = StringIO()
+        tmp = Console(file=buf, width=console.width or 80, highlight=False)
+        tmp.print(table)
+        tmp.print(hint)
+        new_line_count = buf.getvalue().count('\n')
 
-        indices = parse_selection(raw, len(entries))
-        if indices is None:
-            console.print(
-                f"  [red]Invalid selection.[/red] Use numbers 1–{len(entries)}, "
-                "ranges like 2-5, or 'all'."
-            )
-            continue
+        # Move cursor back up to overwrite the previous render
+        if lines_printed > 0:
+            sys.stdout.write(f'\x1b[{lines_printed}A\x1b[0J')
+            sys.stdout.flush()
 
-        return indices
+        console.print(table)
+        console.print(hint)
+        lines_printed = new_line_count
+
+    rerender()
+
+    try:
+        with _raw_terminal():
+            while True:
+                key = _read_key()
+
+                if key == "\x1b[A":         # up arrow
+                    cursor = (cursor - 1) % count
+                elif key == "\x1b[B":       # down arrow
+                    cursor = (cursor + 1) % count
+                elif key == " ":            # space → toggle
+                    if cursor in selected:
+                        selected.discard(cursor)
+                    else:
+                        selected.add(cursor)
+                elif key in ("a", "A"):     # select all / none
+                    if len(selected) == count:
+                        selected.clear()
+                    else:
+                        selected = set(range(count))
+                elif key in ("\r", "\n"):   # enter → confirm
+                    break
+                elif key in ("q", "Q", "\x1b"):  # q / Escape → abort
+                    return None
+
+                rerender()
+    except KeyboardInterrupt:              # Ctrl+C → abort
+        console.print()
+        return None
+
+    if not selected:
+        console.print("  [yellow]Nothing selected.[/yellow]")
+        return None
+
+    return sorted(selected)
 
 
 def ingest_panel(title: str, segments: int, vectors: int) -> None:
