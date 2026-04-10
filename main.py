@@ -111,18 +111,38 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
         urls_to_process = [entries[i]["url"] for i in selected_indices]
 
     # ── Process each URL ──────────────────────────────────────────────────────
+    failures: list[tuple[str, Exception]] = []
     for i, url in enumerate(urls_to_process, start=1):
         if len(urls_to_process) > 1:
             ui.console.print(
                 f"\n[bold cyan][{i}/{len(urls_to_process)}][/bold cyan] Processing…"
             )
-        ingest(
-            url,
-            language=args.language,
-            force=args.force,
-            initial_prompt=initial_prompt,
-            on_progress=_ProgressHandler(),
-        )
+        try:
+            ingest(
+                url,
+                language=args.language,
+                force=args.force,
+                initial_prompt=initial_prompt,
+                on_progress=_ProgressHandler(),
+            )
+        except Exception as exc:
+            ui.console.print(f"\n[bold red]✗ Failed:[/bold red] {url}\n  [red]{exc}[/red]")
+            failures.append((url, exc))
+
+    if len(urls_to_process) > 1:
+        succeeded = len(urls_to_process) - len(failures)
+        if failures:
+            ui.console.print(
+                f"\n[yellow]{succeeded}/{len(urls_to_process)} items succeeded,"
+                f" {len(failures)} failed.[/yellow]"
+            )
+        else:
+            ui.console.print(
+                f"\n[bold green]All {succeeded} items processed successfully.[/bold green]"
+            )
+
+    if failures:
+        sys.exit(1)
 
 
 def _cmd_search_keyword(args: argparse.Namespace) -> None:

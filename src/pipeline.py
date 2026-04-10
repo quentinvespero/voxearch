@@ -77,20 +77,29 @@ def ingest(
 
     # ── 4. Qdrant ────────────────────────────────────────────────────────────
     on_progress({"step": 4, "total": INGEST_STEPS, "label": "Embedding (Qdrant)", "status": "running"})
-    texts    = [s["text"] for s in segments]
-    vectors  = embedder.embed_texts(texts)
-    payloads = [
-        {
-            "source_id":    source_id,
-            "source_title": audio_info["title"],
-            "source_url":   url,
-            "start_time":   s["start"],
-            "end_time":     s["end"],
-            "text":         s["text"],
-        }
-        for s in segments
-    ]
-    vector_store.insert_segments(segment_ids, vectors, payloads)
+    try:
+        texts    = [s["text"] for s in segments]
+        vectors  = embedder.embed_texts(texts)
+        payloads = [
+            {
+                "source_id":    source_id,
+                "source_title": audio_info["title"],
+                "source_url":   url,
+                "start_time":   s["start"],
+                "end_time":     s["end"],
+                "text":         s["text"],
+            }
+            for s in segments
+        ]
+        vector_store.insert_segments(segment_ids, vectors, payloads)
+    except Exception:
+        # Roll back SQLite data to keep stores in sync — source never reached
+        # 'complete' status so it's safe to wipe and allow clean re-ingestion.
+        try:
+            sqlite_store.delete_source_by_id(DB_PATH, source_id)
+        except Exception:
+            pass  # rollback failed, but we still want to surface the original error
+        raise
     on_progress({"step": 4, "total": INGEST_STEPS, "label": "Embedding (Qdrant)", "status": "done", "detail": f"{len(segment_ids)} embeddings stored"})
 
     sqlite_store.mark_source_complete(DB_PATH, source_id)
