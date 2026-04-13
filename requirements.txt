@@ -13,6 +13,7 @@ uvicorn[standard]
 
 # Embedding model (multilingual MiniLM, ~420 MB first-time download)
 sentence-transformers
+huggingface_hub
 
 # Terminal UX (colors, spinners, tables, panels)
 rich

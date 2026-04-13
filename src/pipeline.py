@@ -2,9 +2,9 @@ import os
 from collections.abc import Callable
 
 from src import downloader, embedder, transcriber
-from src.config import AUDIO_DIR, DB_PATH
+from src.config import AUDIO_DIR, DB_PATH, TRANSCRIPTION_MODEL
 from src.database import sqlite_store, vector_store
-from src.utils import normalize_url
+from src.utils import normalize_url, is_hf_model_cached
 
 
 INGEST_STEPS = 4
@@ -65,9 +65,12 @@ def ingest(
     on_progress({"step": 1, "total": INGEST_STEPS, "label": "Downloading", "status": "done", "detail": audio_info["title"]})
 
     # ── 2. Transcribe ────────────────────────────────────────────────────────
-    on_progress({"step": 2, "total": INGEST_STEPS, "label": "Transcribing", "status": "running"})
+    # Show "Downloading & transcribing" on first run so the user knows a model
+    # download is in progress, not just audio processing.
+    _transcribe_label = "Transcribing" if is_hf_model_cached(TRANSCRIPTION_MODEL) else "Downloading & transcribing"
+    on_progress({"step": 2, "total": INGEST_STEPS, "label": _transcribe_label, "status": "running"})
     segments = transcriber.transcribe(audio_info["file_path"], language=language, initial_prompt=initial_prompt)
-    on_progress({"step": 2, "total": INGEST_STEPS, "label": "Transcribing", "status": "done", "detail": f"{len(segments)} segments"})
+    on_progress({"step": 2, "total": INGEST_STEPS, "label": _transcribe_label, "status": "done", "detail": f"{len(segments)} segments"})
 
     # ── 3. SQLite ────────────────────────────────────────────────────────────
     on_progress({"step": 3, "total": INGEST_STEPS, "label": "Indexing (SQLite)", "status": "running"})
