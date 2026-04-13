@@ -19,7 +19,7 @@ A self-contained desktop application that anyone can download and run locally �
 
 ## Current Status
 
-> **The project is being revived and restructured.** The old codebase targeted Linux + NVIDIA GPU (vllm, CUDA, etc.) and does not run on Apple Silicon. A clean rewrite is in progress targeting macOS Apple Silicon first.
+The CLI pipeline is **functional end-to-end** on Apple Silicon: download → transcribe → SQLite → Qdrant. The FastAPI server for the Swift GUI is also implemented. Features include playlist/feed detection with an interactive selection UI, rollback on Qdrant failure, and URL normalization for deduplication.
 
 ## Target Environment
 
@@ -51,8 +51,56 @@ The CLI pipeline is also exposed over HTTP via a FastAPI server (`src/server.py`
 | GUI API server | FastAPI + uvicorn | HTTP + SSE server wrapping the pipeline for the macOS native GUI (`src/server.py`) |
 
 ### SQLite Schema
-- **sources** — title, url, type (podcast/youtube/file), date added
-- **transcription_segments** — source_id, start_time, end_time, text
+
+**`sources`**
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | INTEGER PK | Auto-increment |
+| `title` | TEXT | Human-readable title |
+| `url` | TEXT UNIQUE | Normalized URL |
+| `description` | TEXT | Episode/video description (nullable) |
+| `status` | TEXT | `'pending'` or `'complete'` |
+| `added_at` | TIMESTAMP | Insertion time |
+
+**`segments`**
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | INTEGER PK | Auto-increment |
+| `source_id` | INTEGER | FK → `sources(id)` ON DELETE CASCADE |
+| `start_time` | REAL | Segment start in seconds |
+| `end_time` | REAL | Segment end in seconds |
+| `text` | TEXT | Transcribed text |
+
+**`segments_fts`** — FTS5 virtual table indexing `segments.text`, kept in sync by three triggers (`segments_ai`, `segments_ad`, `segments_au`).
+
+### FastAPI Endpoints (`src/server.py`)
+
+Run with: `uv run uvicorn src.server:app --port 8765`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Readiness probe |
+| POST | `/ingest` | Run ingest pipeline, stream progress as SSE |
+| GET | `/sources` | List all ingested sources |
+| DELETE | `/sources/{id}` | Delete source + segments from SQLite and Qdrant |
+| GET | `/search/keyword` | Full-text keyword search (`?q=...&limit=N`) |
+| GET | `/search/semantic` | Semantic similarity search (`?q=...&limit=N`) |
+
+### Module Map (`src/`)
+
+| File | Role |
+|------|------|
+| `config.py` | Global paths and model names |
+| `downloader.py` | yt-dlp wrapper: download + playlist/feed detection |
+| `transcriber.py` | mlx-whisper wrapper |
+| `embedder.py` | sentence-transformers wrapper |
+| `pipeline.py` | 4-step ingest orchestrator (download → transcribe → SQLite → Qdrant) |
+| `ui.py` | Rich TUI: progress panels, interactive playlist selector, preflight model checks |
+| `server.py` | FastAPI HTTP/SSE server for the Swift GUI |
+| `utils.py` | URL normalization, HuggingFace model cache checks |
+| `updater.py` | yt-dlp version checker/updater |
+| `database/sqlite_store.py` | SQLite schema init, queries, migrations |
+| `database/vector_store.py` | Qdrant wrapper: upsert, delete, semantic search |
 
 ## Key Commands
 
@@ -78,15 +126,6 @@ mlx_whisper --model mlx-community/whisper-large-v3-turbo --language fr <audio.mp
 
 ## Tracking Progress
 
-A `PROGRESS.md` file at the root tracks the status of each pipeline step and a milestone log.
-
-**Update it when:**
-- A pipeline step reaches a meaningful milestone (first working implementation, schema change, confirmed working end-to-end, etc.)
-- A known gap or limitation is resolved
-- A new significant gap is discovered
-
-**Do not** update it for minor fixes, refactors, or work-in-progress changes.
-
 ### Keeping COMMANDS.md up to date
 
 `COMMANDS.md` lists all CLI commands and their options for quick reference.
@@ -103,6 +142,9 @@ Update `CLAUDE.md` when:
 - A new key technology is added or an existing one is replaced (e.g. switching transcription backend, adding an embeddings model)
 - The data flow or architecture changes meaningfully (new pipeline step, removed step, schema change)
 - The target environment or platform assumptions change
+- A new `src/` module is added or an existing one is removed → update the Module Map
+- The SQLite schema changes (new column, new table, column renamed) → update the Schema section
+- The FastAPI server gains or loses endpoints → update the Endpoints section
 
 **Do not** update it for implementation details, bug fixes, or refactors that don't affect the architecture or stack.
 

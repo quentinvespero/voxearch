@@ -1,10 +1,8 @@
-import os
-
 import mlx_whisper
+from huggingface_hub import snapshot_download
 
 from src import ui
 from src.config import TRANSCRIPTION_MODEL
-from src.utils import is_hf_model_cached
 
 
 def transcribe(
@@ -32,35 +30,29 @@ def transcribe(
           - end   (float): end time in seconds
           - text  (str):   transcribed text for that segment
     """
-    cached = is_hf_model_cached(model)
-    if cached:
-        ui.info(f"Loading transcription model {model} …")
-    else:
-        ui.info(f"Downloading transcription model {model} (first run — this may take a few minutes) …")
-
-    # When the model is already cached, prevent huggingface_hub from making a
-    # network request to check for updates (snapshot_download → api.repo_info
-    # hits HF servers even with a complete local cache, which can hang).
-    _prev_offline = os.environ.get("HF_HUB_OFFLINE")
-    if cached:
-        os.environ["HF_HUB_OFFLINE"] = "1"
-
+    # Try the local cache first (no network call).
+    # local_files_only=True raises EnvironmentError if the snapshot is missing.
     try:
-        result = mlx_whisper.transcribe(
-            audio_path,
-            path_or_hf_repo=model,
-            language=language,
-            initial_prompt=initial_prompt,
-            verbose=False,
-            # word_timestamps adds overhead and we don't need them
-            word_timestamps=False,
-        )
-    finally:
-        # Restore previous value so we don't leak the flag into other library calls
-        if _prev_offline is None:
-            os.environ.pop("HF_HUB_OFFLINE", None)
-        else:
-            os.environ["HF_HUB_OFFLINE"] = _prev_offline
+        model_path = snapshot_download(model, local_files_only=True)
+        ui.info(f"Loading transcription model {model} …")
+    except EnvironmentError:
+        ui.info(f"Downloading transcription model {model} (~1.5 GB, first run) …")
+        # etag_timeout=30 caps the initial connection check at 30 s instead of
+        # hanging indefinitely when HuggingFace is unreachable.
+        model_path = snapshot_download(model, etag_timeout=30)
+
+    # Pass the resolved local path, not the repo ID.
+    # mlx_whisper's load_model checks Path(path_or_hf_repo).exists() first and
+    # skips its own snapshot_download when the path already exists — no network call.
+    result = mlx_whisper.transcribe(
+        audio_path,
+        path_or_hf_repo=model_path,
+        language=language,
+        initial_prompt=initial_prompt,
+        verbose=False,
+        # word_timestamps adds overhead and we don't need them
+        word_timestamps=False,
+    )
 
     return [
         {
