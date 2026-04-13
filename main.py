@@ -11,6 +11,8 @@ import argparse
 import sys
 from pathlib import Path
 
+__version__ = "0.2.0"
+
 from src.config import DB_PATH, TRANSCRIPTION_MODEL, EMBEDDING_MODEL
 from src.database import sqlite_store, vector_store
 from src import embedder, updater, ui
@@ -175,6 +177,11 @@ def _cmd_search_semantic(args: argparse.Namespace) -> None:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Transcribe audio and search transcripts"
+    )
+    parser.add_argument(
+        "--version", "-V",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
