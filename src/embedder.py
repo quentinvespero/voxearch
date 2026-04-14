@@ -1,10 +1,8 @@
-import os
-
+from huggingface_hub import snapshot_download
 from sentence_transformers import SentenceTransformer
 
 from src import ui
 from src.config import EMBEDDING_MODEL
-from src.utils import is_hf_model_cached
 
 # Module-level cache so the model is only loaded once per process
 _model: SentenceTransformer | None = None
@@ -13,25 +11,20 @@ _model: SentenceTransformer | None = None
 def _get_model() -> SentenceTransformer:
     global _model
     if _model is None:
-        cached = is_hf_model_cached(EMBEDDING_MODEL)
-        if cached:
-            ui.info(f"Loading embedding model {EMBEDDING_MODEL} …")
-        else:
-            ui.info(f"Downloading embedding model {EMBEDDING_MODEL} (first run) …")
-
-        # When the model is already cached, prevent huggingface_hub from making a
-        # network request to check for updates (can hang even with a complete cache).
-        _prev = os.environ.get("HF_HUB_OFFLINE")
-        if cached:
-            os.environ["HF_HUB_OFFLINE"] = "1"
-
+        # Try the local cache first (no network call).
+        # local_files_only=True raises EnvironmentError if the snapshot is missing.
         try:
-            _model = SentenceTransformer(EMBEDDING_MODEL)
-        finally:
-            if _prev is None:
-                os.environ.pop("HF_HUB_OFFLINE", None)
-            else:
-                os.environ["HF_HUB_OFFLINE"] = _prev
+            model_path = snapshot_download(EMBEDDING_MODEL, local_files_only=True)
+            ui.info(f"Loading embedding model {EMBEDDING_MODEL} …")
+        except EnvironmentError:
+            ui.info(f"Downloading embedding model {EMBEDDING_MODEL} (first run) …")
+            # etag_timeout=30 caps the initial connection check at 30 s instead of
+            # hanging indefinitely when HuggingFace is unreachable.
+            model_path = snapshot_download(EMBEDDING_MODEL, etag_timeout=30)
+
+        # Pass the resolved local path so SentenceTransformer skips its own
+        # network lookup — it checks Path(path).exists() and loads directly.
+        _model = SentenceTransformer(model_path)
 
     return _model
 
