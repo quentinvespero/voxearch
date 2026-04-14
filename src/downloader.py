@@ -37,6 +37,13 @@ def fetch_playlist_entries(url: str) -> list[dict] | None:
     return result
 
 
+def _parse_upload_date(raw: str | None) -> str | None:
+    # yt-dlp returns "YYYYMMDD" → convert to ISO "YYYY-MM-DD"
+    if raw and len(raw) == 8 and raw.isdigit():
+        return f"{raw[:4]}-{raw[4:6]}-{raw[6:]}"
+    return None
+
+
 def download_audio(url: str, output_dir: str, force: bool = False) -> dict:
     """
     Download audio from a URL using yt-dlp and convert it to MP3.
@@ -45,10 +52,13 @@ def download_audio(url: str, output_dir: str, force: bool = False) -> dict:
     and the cached file is returned immediately.
 
     Returns a dict with:
-      - title       (str):      human-readable title from the source
-      - url         (str):      original URL
-      - file_path   (str):      path to the downloaded .mp3 file
-      - description (str|None): episode/video description, if available
+      - title          (str):      human-readable title from the source
+      - url            (str):      original URL
+      - file_path      (str):      path to the downloaded .mp3 file
+      - description    (str|None): episode/video description, if available
+      - upload_date    (str|None): publication date as "YYYY-MM-DD", if available
+      - season_number  (int|None): podcast season number, if available
+      - episode_number (int|None): podcast episode number, if available
     """
     os.makedirs(output_dir, exist_ok=True)
 
@@ -83,10 +93,13 @@ def download_audio(url: str, output_dir: str, force: bool = False) -> dict:
             if os.path.isfile(expected_mp3):
                 ui.info("[cache] Audio file already on disk, skipping download.")
                 return {
-                    "title": info.get("title", "unknown"),
-                    "url": url,
-                    "file_path": expected_mp3,
-                    "description": info.get("description"),
+                    "title":          info.get("title", "unknown"),
+                    "url":            url,
+                    "file_path":      expected_mp3,
+                    "description":    info.get("description"),
+                    "upload_date":    _parse_upload_date(info.get("upload_date")),
+                    "season_number":  info.get("season_number"),
+                    "episode_number": info.get("episode_number"),
                 }
 
         info = ydl.extract_info(url, download=True)
@@ -94,8 +107,11 @@ def download_audio(url: str, output_dir: str, force: bool = False) -> dict:
     file_path = info["requested_downloads"][-1]["filepath"]
 
     return {
-        "title": info.get("title", "unknown"),
-        "url": url,
-        "file_path": file_path,
-        "description": info.get("description"),
+        "title":          info.get("title", "unknown"),
+        "url":            url,
+        "file_path":      file_path,
+        "description":    info.get("description"),
+        "upload_date":    _parse_upload_date(info.get("upload_date")),
+        "season_number":  info.get("season_number"),
+        "episode_number": info.get("episode_number"),
     }

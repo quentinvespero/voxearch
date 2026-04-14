@@ -34,12 +34,15 @@ def init_db(db_path: str) -> None:
     with _connect(db_path) as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS sources (
-                id          INTEGER   PRIMARY KEY AUTOINCREMENT,
-                title       TEXT      NOT NULL,
-                url         TEXT      UNIQUE NOT NULL,
-                description TEXT,
-                status      TEXT      NOT NULL DEFAULT 'pending',
-                added_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                id             INTEGER   PRIMARY KEY AUTOINCREMENT,
+                title          TEXT      NOT NULL,
+                url            TEXT      UNIQUE NOT NULL,
+                description    TEXT,
+                status         TEXT      NOT NULL DEFAULT 'pending',
+                added_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                upload_date    TEXT,
+                season_number  INTEGER,
+                episode_number INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS segments (
@@ -85,6 +88,19 @@ def init_db(db_path: str) -> None:
             conn.execute("ALTER TABLE sources ADD COLUMN description TEXT")
         except sqlite3.OperationalError:
             pass  # column already exists
+
+        # Migration: add upload metadata columns
+        # col_def values are hardcoded literals — not user input, safe to interpolate
+        # (SQLite doesn't support ? placeholders in DDL statements)
+        for col_def in [
+            "upload_date    TEXT",
+            "season_number  INTEGER",
+            "episode_number INTEGER",
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE sources ADD COLUMN {col_def}")
+            except sqlite3.OperationalError:
+                pass  # column already exists
 
 
 def get_source_status(db_path: str, url: str) -> str | None:
@@ -135,15 +151,27 @@ def delete_source_by_id(db_path: str, source_id: int) -> bool:
         return cursor.rowcount > 0
 
 
-def insert_source(db_path: str, title: str, url: str, description: str | None = None) -> int:
+def insert_source(
+    db_path: str,
+    title: str,
+    url: str,
+    description: str | None = None,
+    upload_date: str | None = None,
+    season_number: int | None = None,
+    episode_number: int | None = None,
+) -> int:
     """
     Insert a source row (or ignore if URL already exists).
     Returns the source id in either case.
     """
     with _connect(db_path) as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO sources (title, url, description) VALUES (?, ?, ?)",
-            (title, url, description),
+            """
+            INSERT OR IGNORE INTO sources
+                (title, url, description, upload_date, season_number, episode_number)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (title, url, description, upload_date, season_number, episode_number),
         )
         row = conn.execute("SELECT id FROM sources WHERE url = ?", (url,)).fetchone()
         return row["id"]
@@ -170,7 +198,8 @@ def list_sources(db_path: str) -> list[dict]:
     """Return all sources ordered by most recently added first."""
     with _connect(db_path) as conn:
         rows = conn.execute(
-            "SELECT id, title, url, description, status, added_at"
+            "SELECT id, title, url, description, status, added_at,"
+            " upload_date, season_number, episode_number"
             " FROM sources ORDER BY added_at DESC"
         ).fetchall()
         return [dict(row) for row in rows]

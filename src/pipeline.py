@@ -74,7 +74,15 @@ def ingest(
 
     # ── 3. SQLite ────────────────────────────────────────────────────────────
     on_progress({"step": 3, "total": INGEST_STEPS, "label": "Indexing (SQLite)", "status": "running"})
-    source_id   = sqlite_store.insert_source(DB_PATH, audio_info["title"], url, audio_info["description"])
+    source_id   = sqlite_store.insert_source(
+        DB_PATH,
+        audio_info["title"],
+        url,
+        audio_info["description"],
+        upload_date=audio_info.get("upload_date"),
+        season_number=audio_info.get("season_number"),
+        episode_number=audio_info.get("episode_number"),
+    )
     segment_ids = sqlite_store.insert_segments(DB_PATH, source_id, segments)
     on_progress({"step": 3, "total": INGEST_STEPS, "label": "Indexing (SQLite)", "status": "done", "detail": f"{len(segment_ids)} segments"})
 

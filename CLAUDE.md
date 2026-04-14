@@ -61,6 +61,9 @@ The CLI pipeline is also exposed over HTTP via a FastAPI server (`src/server.py`
 | `description` | TEXT | Episode/video description (nullable) |
 | `status` | TEXT | `'pending'` or `'complete'` |
 | `added_at` | TIMESTAMP | Insertion time |
+| `upload_date` | TEXT | Publication date as `YYYY-MM-DD` (nullable) |
+| `season_number` | INTEGER | Podcast season number (nullable) |
+| `episode_number` | INTEGER | Podcast episode number (nullable) |
 
 **`segments`**
 | Column | Type | Notes |
