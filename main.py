@@ -96,7 +96,8 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
     initial_prompt = "\n".join(filter(None, [file_prompt, args.initial_prompt])) or None
 
     # ── Playlist / feed detection ─────────────────────────────────────────────
-    entries = fetch_playlist_entries(args.url)
+    with ui.console.status("[bold cyan]Fetching…[/bold cyan]"):
+        entries = fetch_playlist_entries(args.url)
 
     if entries is None:
         # Single item — original behaviour unchanged

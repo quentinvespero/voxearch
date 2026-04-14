@@ -17,6 +17,7 @@ def fetch_playlist_entries(url: str) -> list[dict] | None:
         "extract_flat": "in_playlist",
         "quiet": True,
         "no_warnings": True,
+        "socket_timeout": 15,  # fail fast instead of hanging indefinitely
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
@@ -82,6 +83,7 @@ def download_audio(url: str, output_dir: str, force: bool = False) -> dict:
         # Suppress progress bars — we print our own status in the pipeline
         "quiet": True,
         "no_warnings": True,
+        "socket_timeout": 15,  # fail fast instead of hanging indefinitely
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
