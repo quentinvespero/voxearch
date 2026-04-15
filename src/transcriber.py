@@ -49,6 +49,8 @@ def transcribe(
         path_or_hf_repo=model_path,
         language=language,
         initial_prompt=initial_prompt,
+        # verbose=False: show tqdm progress bar but suppress per-segment text output.
+        # We don't start a Rich spinner for this step (see _ProgressHandler in main.py),
         verbose=False,
         # word_timestamps adds overhead and we don't need them
         word_timestamps=False,

@@ -78,6 +78,9 @@ async def ingest_endpoint(body: IngestRequest):
     msg_queue: queue.Queue[dict | _PipelineError | None] = queue.Queue()
 
     def on_progress(event: dict) -> None:
+        # "batch" events are CLI-only (Rich progress bar) — don't forward to the GUI
+        if event.get("status") == "batch":
+            return
         msg_queue.put(event)
 
     def run() -> None:

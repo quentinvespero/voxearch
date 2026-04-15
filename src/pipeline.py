@@ -9,6 +9,13 @@ from src.utils import normalize_url, is_hf_model_cached
 
 INGEST_STEPS = 4
 
+# Step labels — imported by main.py to identify spinner-free steps
+LABEL_DOWNLOAD            = "Downloading"
+LABEL_SQLITE              = "Indexing (SQLite)"
+LABEL_EMBED               = "Embedding (Qdrant)"
+LABEL_TRANSCRIBE          = "Transcribing"
+LABEL_TRANSCRIBE_DOWNLOAD = "Downloading & transcribing"
+
 
 def _run_qdrant_step(
     source_id: int,
@@ -24,9 +31,14 @@ def _run_qdrant_step(
     Embed segments and store them in Qdrant.
     Raises on failure — caller is responsible for cleanup.
     """
-    on_progress({"step": step, "total": total, "label": "Embedding (Qdrant)", "status": "running"})
+    on_progress({"step": step, "total": total, "label": LABEL_EMBED, "status": "running"})
     texts = [s["text"] for s in segments]
-    vectors = embedder.embed_texts(texts)
+
+    def _batch_progress(current: int, total_batches: int) -> None:
+        on_progress({"step": step, "total": total, "label": LABEL_EMBED,
+                     "status": "batch", "current": current, "total_batches": total_batches})
+
+    vectors = embedder.embed_texts(texts, on_progress=_batch_progress)
     payloads = [
         {
             "source_id": source_id,
@@ -39,7 +51,7 @@ def _run_qdrant_step(
         for s in segments
     ]
     vector_store.insert_segments(segment_ids, vectors, payloads)
-    on_progress({"step": step, "total": total, "label": "Embedding (Qdrant)", "status": "done", "detail": f"{len(segment_ids)} embeddings stored"})
+    on_progress({"step": step, "total": total, "label": LABEL_EMBED, "status": "done", "detail": f"{len(segment_ids)} embeddings stored"})
 
 
 def ingest(
@@ -140,14 +152,14 @@ def ingest(
             sqlite_store.delete_source_by_id(DB_PATH, existing_id)  # cascades to segments
 
     # ── 1. Download ──────────────────────────────────────────────────────────
-    on_progress({"step": 1, "total": INGEST_STEPS, "label": "Downloading", "status": "running"})
+    on_progress({"step": 1, "total": INGEST_STEPS, "label": LABEL_DOWNLOAD, "status": "running"})
     audio_info = downloader.download_audio(url, AUDIO_DIR, force=force)
-    on_progress({"step": 1, "total": INGEST_STEPS, "label": "Downloading", "status": "done", "detail": audio_info["title"]})
+    on_progress({"step": 1, "total": INGEST_STEPS, "label": LABEL_DOWNLOAD, "status": "done", "detail": audio_info["title"]})
 
     # ── 2. Transcribe ────────────────────────────────────────────────────────
     # Show "Downloading & transcribing" on first run so the user knows a model
     # download is in progress, not just audio processing.
-    _transcribe_label = "Transcribing" if is_hf_model_cached(TRANSCRIPTION_MODEL) else "Downloading & transcribing"
+    _transcribe_label = LABEL_TRANSCRIBE if is_hf_model_cached(TRANSCRIPTION_MODEL) else LABEL_TRANSCRIBE_DOWNLOAD
     on_progress({"step": 2, "total": INGEST_STEPS, "label": _transcribe_label, "status": "running"})
     segments = transcriber.transcribe(audio_info["file_path"], language=language, initial_prompt=initial_prompt)
     on_progress({"step": 2, "total": INGEST_STEPS, "label": _transcribe_label, "status": "done", "detail": f"{len(segments)} segments"})
@@ -155,7 +167,7 @@ def ingest(
     # ── 3. SQLite ────────────────────────────────────────────────────────────
     # Source row + all segments are inserted atomically. If this fails, no
     # partial state is left — the next run starts from scratch.
-    on_progress({"step": 3, "total": INGEST_STEPS, "label": "Indexing (SQLite)", "status": "running"})
+    on_progress({"step": 3, "total": INGEST_STEPS, "label": LABEL_SQLITE, "status": "running"})
     source_id, segment_ids = sqlite_store.insert_source_with_segments(
         DB_PATH,
         audio_info["title"],
@@ -166,7 +178,7 @@ def ingest(
         episode_number=audio_info.get("episode_number"),
         segments=segments,
     )
-    on_progress({"step": 3, "total": INGEST_STEPS, "label": "Indexing (SQLite)", "status": "done", "detail": f"{len(segment_ids)} segments"})
+    on_progress({"step": 3, "total": INGEST_STEPS, "label": LABEL_SQLITE, "status": "done", "detail": f"{len(segment_ids)} segments"})
 
     # ── 4. Qdrant ────────────────────────────────────────────────────────────
     # Source is now 'pending'. If this step fails or is interrupted, the next
