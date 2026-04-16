@@ -11,7 +11,7 @@ import argparse
 import sys
 from pathlib import Path
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 from rich.progress import Progress, BarColumn, TaskProgressColumn, TimeElapsedColumn, TaskID
 
