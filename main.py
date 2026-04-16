@@ -11,7 +11,7 @@ import argparse
 import sys
 from pathlib import Path
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 from src.config import DB_PATH, TRANSCRIPTION_MODEL, EMBEDDING_MODEL
 from src.database import sqlite_store, vector_store
