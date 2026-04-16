@@ -1,0 +1,5 @@
+-r requirements.txt
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest
+httpx  # required by FastAPI/Starlette TestClient for async endpoints
