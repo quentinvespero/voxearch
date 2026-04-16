@@ -12,3 +12,4 @@ vllm
 pywhispercpp
 transcription*
 data
+.coverage

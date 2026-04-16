@@ -165,3 +165,22 @@ Update `CLAUDE.md` when:
 
 ## Gitignored Paths
 Audio files (`.mp3`, `.wav`), model weights, the `whisper.cpp` submodule, and the `data/` directory are gitignored and must be set up locally.
+
+## Testing
+
+Write tests when you add or modify:
+- Pure/utility functions (`utils.py`)
+- SQLite database operations (`sqlite_store.py`)
+- FastAPI endpoints (`server.py`)
+
+**Do NOT write tests for:**
+- `transcriber.py` — requires real mlx-whisper model weights + an audio file
+- `embedder.py` — requires real sentence-transformers model (~420 MB)
+- `vector_store.py` — requires a running Qdrant instance
+- Terminal UI (`ui.py`, `progress.py`) — visual/interactive output
+
+**Conventions:**
+- Test files: `tests/test_<module_name>.py`
+- Framework: pytest (`uv run pytest`)
+- SQLite tests: use the `tmp_path` pytest built-in fixture for temp DB files
+- Server tests: use FastAPI `TestClient`; mock pipeline/DB/embedder with `unittest.mock.patch`
