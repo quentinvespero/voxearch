@@ -178,6 +178,7 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
                 initial_prompt=initial_prompt,
                 on_progress=_ProgressHandler(),
                 prefetched_metadata=prefetched,
+                auto_context=args.auto_context,
             )
         except Exception as exc:
             ui.console.print(f"\n[bold red]✗ Failed:[/bold red] {url}\n  [red]{exc}[/red]")
@@ -276,6 +277,13 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         default=None,
         help="Path to a text file used as context hint for Whisper. Merged with --prompt if both are provided.",
+    )
+    ingest_p.add_argument(
+        "--no-auto-context",
+        dest="auto_context",
+        action="store_false",
+        default=True,
+        help="Disable automatic use of yt-dlp title/description as Whisper context.",
     )
     ingest_p.add_argument(
         "--yes", "-y",

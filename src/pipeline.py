@@ -9,6 +9,11 @@ from src.utils import normalize_url, is_hf_model_cached
 
 INGEST_STEPS = 4
 
+# Maximum characters from the yt-dlp description included in the auto-context
+# prompt. Whisper's initial_prompt is tokenised as a prefix — long inputs are
+# silently truncated by the model, so keeping this short avoids wasted tokens.
+_MAX_DESC_CONTEXT_CHARS = 500
+
 # Step labels — imported by main.py to identify spinner-free steps
 LABEL_DOWNLOAD            = "Downloading"
 LABEL_SQLITE              = "Indexing (SQLite)"
@@ -54,6 +59,16 @@ def _run_qdrant_step(
     on_progress({"step": step, "total": total, "label": LABEL_EMBED, "status": "done", "detail": f"{len(segment_ids)} embeddings stored"})
 
 
+def _build_auto_context(audio_info: dict) -> str | None:
+    """Build a Whisper context string from yt-dlp metadata (title + description)."""
+    parts = []
+    if title := (audio_info.get("title") or "").strip():
+        parts.append(title)
+    if desc := audio_info.get("description"):
+        parts.append(desc.strip()[:_MAX_DESC_CONTEXT_CHARS])
+    return "\n".join(parts) if parts else None
+
+
 def ingest(
     url: str,
     language: str | None = None,
@@ -61,6 +76,7 @@ def ingest(
     initial_prompt: str | None = None,
     on_progress: Callable[[dict], None] = lambda _: None,
     prefetched_metadata: dict | None = None,
+    auto_context: bool = True,
 ) -> None:
     """
     Full ingest pipeline for a single audio URL:
@@ -82,13 +98,18 @@ def ingest(
         language:       ISO 639-1 language hint for Whisper (e.g. "fr", "en").
                         None = auto-detect (slightly slower).
         force:          Re-download and re-transcribe even if already processed.
-        initial_prompt: Optional context hint for Whisper (e.g. "React, TypeScript").
+        initial_prompt: Optional extra context hint for Whisper (e.g. "React, TypeScript").
+                        Appended after the auto-context when auto_context=True.
                         See transcriber.transcribe() for details.
         on_progress:    Callback receiving structured progress dicts. Shape:
                           {"step": int, "total": int, "label": str, "status": "running"|"done", "detail": str}
                           {"status": "skipped", "detail": str}
                           {"status": "complete"}
                         Defaults to a no-op so the function is safe to call without a callback.
+        prefetched_metadata: yt-dlp metadata dict already fetched by the caller (e.g. during
+                        playlist resolution). Skips a redundant yt-dlp network call when provided.
+        auto_context:   When True (default), build a context prompt from the yt-dlp
+                        title and description and prepend it to initial_prompt.
     """
     url = normalize_url(url)
 
@@ -174,11 +195,19 @@ def ingest(
     on_progress({"step": 1, "total": INGEST_STEPS, "label": LABEL_DOWNLOAD, "status": "done", "detail": audio_info["title"]})
 
     # ── 2. Transcribe ────────────────────────────────────────────────────────
+    # Build effective prompt: auto-context (title + description) first, then
+    # any user-supplied prompt. Auto-context can be disabled with auto_context=False.
+    if auto_context:
+        auto = _build_auto_context(audio_info)
+        effective_prompt = "\n".join(filter(None, [auto, initial_prompt])) or None
+    else:
+        effective_prompt = initial_prompt
+
     # Show "Downloading & transcribing" on first run so the user knows a model
     # download is in progress, not just audio processing.
     _transcribe_label = LABEL_TRANSCRIBE if is_hf_model_cached(TRANSCRIPTION_MODEL) else LABEL_TRANSCRIBE_DOWNLOAD
     on_progress({"step": 2, "total": INGEST_STEPS, "label": _transcribe_label, "status": "running"})
-    segments = transcriber.transcribe(audio_info["file_path"], language=language, initial_prompt=initial_prompt)
+    segments = transcriber.transcribe(audio_info["file_path"], language=language, initial_prompt=effective_prompt)
     on_progress({"step": 2, "total": INGEST_STEPS, "label": _transcribe_label, "status": "done", "detail": f"{len(segments)} segments"})
 
     # ── 3. SQLite ────────────────────────────────────────────────────────────

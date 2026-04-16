@@ -43,6 +43,7 @@ class IngestRequest(BaseModel):
     language: str | None = None
     force: bool = False
     initial_prompt: str | None = None
+    auto_context: bool = True
 
 
 class Source(BaseModel):
@@ -94,6 +95,7 @@ async def ingest_endpoint(body: IngestRequest):
                 body.force,
                 body.initial_prompt,
                 on_progress=on_progress,
+                auto_context=body.auto_context,
             )
         except Exception as e:
             msg_queue.put(_PipelineError(str(e)))
