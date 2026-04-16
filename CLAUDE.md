@@ -61,6 +61,9 @@ The CLI pipeline is also exposed over HTTP via a FastAPI server (`src/server.py`
 | `description` | TEXT | Episode/video description (nullable) |
 | `status` | TEXT | `'pending'` or `'complete'` |
 | `added_at` | TIMESTAMP | Insertion time |
+| `upload_date` | TEXT | Publication date as `YYYY-MM-DD` (nullable) |
+| `season_number` | INTEGER | Podcast season number (nullable) |
+| `episode_number` | INTEGER | Podcast episode number (nullable) |
 
 **`segments`**
 | Column | Type | Notes |
@@ -72,6 +75,18 @@ The CLI pipeline is also exposed over HTTP via a FastAPI server (`src/server.py`
 | `text` | TEXT | Transcribed text |
 
 **`segments_fts`** — FTS5 virtual table indexing `segments.text`, kept in sync by three triggers (`segments_ai`, `segments_ad`, `segments_au`).
+
+### Ingest State Machine
+
+The `sources.status` column drives deduplication and resume logic in `pipeline.py`:
+
+| DB state | Meaning | Action on retry |
+|----------|---------|-----------------|
+| No row | Never processed, or failed before/during SQLite | Run from scratch (yt-dlp reuses cached audio) |
+| `pending` | All segments stored in SQLite; Qdrant step not completed | Resume from Qdrant step only |
+| `complete` | Fully ingested | Skip |
+
+**Invariant:** the source row and all its segments are inserted atomically (single transaction). A partial SQLite write cannot produce a `pending` row — if SQLite fails, no row exists and the next run starts from scratch.
 
 ### FastAPI Endpoints (`src/server.py`)
 

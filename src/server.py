@@ -43,6 +43,7 @@ class IngestRequest(BaseModel):
     language: str | None = None
     force: bool = False
     initial_prompt: str | None = None
+    auto_context: bool = True
 
 
 class Source(BaseModel):
@@ -78,16 +79,23 @@ async def ingest_endpoint(body: IngestRequest):
     msg_queue: queue.Queue[dict | _PipelineError | None] = queue.Queue()
 
     def on_progress(event: dict) -> None:
+        # "batch" events are CLI-only (Rich progress bar) — don't forward to the GUI
+        if event.get("status") == "batch":
+            return
         msg_queue.put(event)
 
     def run() -> None:
         try:
+            # TODO: support playlist ingestion — the server currently handles
+            # only single-URL requests. Playlist selection and prefetched_metadata
+            # passing would require a richer request body and a selection step.
             pipeline.ingest(
                 str(body.url),
                 body.language,
                 body.force,
                 body.initial_prompt,
                 on_progress=on_progress,
+                auto_context=body.auto_context,
             )
         except Exception as e:
             msg_queue.put(_PipelineError(str(e)))

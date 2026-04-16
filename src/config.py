@@ -18,12 +18,12 @@ TRANSCRIPTION_MODEL = "mlx-community/whisper-large-v3-turbo"
 # ── Embeddings ───────────────────────────────────────────────────────────────
 # Multilingual MiniLM: compact (~420 MB), covers French, English, and more.
 # Produces 384-dimensional vectors — keep EMBEDDING_DIMENSION in sync.
-EMBEDDING_MODEL     = "paraphrase-multilingual-MiniLM-L12-v2"
+EMBEDDING_MODEL     = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 EMBEDDING_DIMENSION = 384
 
 # ── Model size hints (shown in the pre-flight download prompt) ────────────────
 # Values are display strings only — no computation is done with them.
 MODEL_SIZE_HINTS: dict[str, str] = {
     "mlx-community/whisper-large-v3-turbo": "~1.5 GB",
-    "paraphrase-multilingual-MiniLM-L12-v2": "~420 MB",
+    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2": "~420 MB",
 }

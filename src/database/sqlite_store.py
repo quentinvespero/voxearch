@@ -34,12 +34,15 @@ def init_db(db_path: str) -> None:
     with _connect(db_path) as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS sources (
-                id          INTEGER   PRIMARY KEY AUTOINCREMENT,
-                title       TEXT      NOT NULL,
-                url         TEXT      UNIQUE NOT NULL,
-                description TEXT,
-                status      TEXT      NOT NULL DEFAULT 'pending',
-                added_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                id             INTEGER   PRIMARY KEY AUTOINCREMENT,
+                title          TEXT      NOT NULL,
+                url            TEXT      UNIQUE NOT NULL,
+                description    TEXT,
+                status         TEXT      NOT NULL DEFAULT 'pending',
+                added_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                upload_date    TEXT,
+                season_number  INTEGER,
+                episode_number INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS segments (
@@ -77,6 +80,9 @@ def init_db(db_path: str) -> None:
             conn.execute(
                 "ALTER TABLE sources ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'"
             )
+            # Pre-migration rows were fully ingested — mark them complete so they
+            # aren't treated as interrupted and unnecessarily re-embedded in Qdrant.
+            conn.execute("UPDATE sources SET status = 'complete'")
         except sqlite3.OperationalError:
             pass  # column already exists
 
@@ -85,6 +91,19 @@ def init_db(db_path: str) -> None:
             conn.execute("ALTER TABLE sources ADD COLUMN description TEXT")
         except sqlite3.OperationalError:
             pass  # column already exists
+
+        # Migration: add upload metadata columns
+        # col_def values are hardcoded literals — not user input, safe to interpolate
+        # (SQLite doesn't support ? placeholders in DDL statements)
+        for col_def in [
+            "upload_date    TEXT",
+            "season_number  INTEGER",
+            "episode_number INTEGER",
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE sources ADD COLUMN {col_def}")
+            except sqlite3.OperationalError:
+                pass  # column already exists
 
 
 def get_source_status(db_path: str, url: str) -> str | None:
@@ -114,6 +133,13 @@ def get_source_id_by_url(db_path: str, url: str) -> int | None:
     return row["id"] if row else None
 
 
+def get_source_by_id(db_path: str, source_id: int) -> dict | None:
+    """Return a single source row by id, or None if not found."""
+    with _connect(db_path) as conn:
+        row = conn.execute("SELECT * FROM sources WHERE id = ?", (source_id,)).fetchone()
+    return dict(row) if row else None
+
+
 def delete_source(db_path: str, url: str) -> None:
     """
     Delete a source and all its segments by URL.
@@ -135,42 +161,68 @@ def delete_source_by_id(db_path: str, source_id: int) -> bool:
         return cursor.rowcount > 0
 
 
-def insert_source(db_path: str, title: str, url: str, description: str | None = None) -> int:
+def insert_source_with_segments(
+    db_path: str,
+    title: str,
+    url: str,
+    description: str | None,
+    upload_date: str | None,
+    season_number: int | None,
+    episode_number: int | None,
+    segments: list[dict],
+) -> tuple[int, list[int]]:
     """
-    Insert a source row (or ignore if URL already exists).
-    Returns the source id in either case.
-    """
-    with _connect(db_path) as conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO sources (title, url, description) VALUES (?, ?, ?)",
-            (title, url, description),
-        )
-        row = conn.execute("SELECT id FROM sources WHERE url = ?", (url,)).fetchone()
-        return row["id"]
-
-
-def insert_segments(db_path: str, source_id: int, segments: list[dict]) -> list[int]:
-    """
-    Bulk-insert transcription segments for a source.
-    Returns the list of inserted row IDs (in insertion order).
+    Atomically insert a source row and all its segments in a single transaction.
+    If either insert fails, both are rolled back — guaranteeing the invariant:
+    source row exists ↔ all segments are present.
+    Returns (source_id, segment_ids).
     """
     with _connect(db_path) as conn:
-        ids = []
-        for seg in segments:
+        try:
             cursor = conn.execute(
+                """
+                INSERT INTO sources
+                    (title, url, description, upload_date, season_number, episode_number)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (title, url, description, upload_date, season_number, episode_number),
+            )
+        except sqlite3.IntegrityError as exc:
+            # This should never happen in normal flow — the pipeline always
+            # cleans up any existing row before calling this function.
+            raise RuntimeError(
+                f"Unexpected duplicate URL in DB: {url!r}. "
+                "This indicates a bug in the pipeline's deduplication logic."
+            ) from exc
+        source_id = cursor.lastrowid
+        segment_ids = []
+        for seg in segments:
+            seg_cursor = conn.execute(
                 "INSERT INTO segments (source_id, start_time, end_time, text)"
                 " VALUES (?, ?, ?, ?)",
                 (source_id, seg["start"], seg["end"], seg["text"]),
             )
-            ids.append(cursor.lastrowid)
-        return ids
+            segment_ids.append(seg_cursor.lastrowid)
+        return source_id, segment_ids
+
+
+def get_segments_by_source_id(db_path: str, source_id: int) -> list[dict]:
+    """Return all segments for a source ordered by start_time."""
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT id, start_time, end_time, text FROM segments"
+            " WHERE source_id = ? ORDER BY start_time",
+            (source_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
 
 
 def list_sources(db_path: str) -> list[dict]:
     """Return all sources ordered by most recently added first."""
     with _connect(db_path) as conn:
         rows = conn.execute(
-            "SELECT id, title, url, description, status, added_at"
+            "SELECT id, title, url, description, status, added_at,"
+            " upload_date, season_number, episode_number"
             " FROM sources ORDER BY added_at DESC"
         ).fetchall()
         return [dict(row) for row in rows]
