@@ -85,6 +85,9 @@ async def ingest_endpoint(body: IngestRequest):
 
     def run() -> None:
         try:
+            # TODO: support playlist ingestion — the server currently handles
+            # only single-URL requests. Playlist selection and prefetched_metadata
+            # passing would require a richer request body and a selection step.
             pipeline.ingest(
                 str(body.url),
                 body.language,

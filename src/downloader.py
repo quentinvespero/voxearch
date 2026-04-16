@@ -10,7 +10,8 @@ def fetch_playlist_entries(url: str) -> list[dict] | None:
     Check whether *url* points to a playlist or feed.
 
     Returns None if the URL resolves to a single item, or a list of entry
-    dicts (keys: id, title, url, duration) if it is a playlist/feed.
+    dicts (keys: id, title, url, duration, description, upload_date,
+    season_number, episode_number) if it is a playlist/feed.
     Uses extract_flat mode — no audio is downloaded.
     """
     ydl_opts = {
@@ -29,19 +30,28 @@ def fetch_playlist_entries(url: str) -> list[dict] | None:
     result = []
     for entry in entries:
         result.append({
-            "id":       entry.get("id", ""),
-            "title":    entry.get("title") or entry.get("id") or "Untitled",
+            "id":             entry.get("id", ""),
+            "title":          entry.get("title") or entry.get("id") or "Untitled",
             # With extract_flat, "url" is the per-item URL suitable for ingest()
-            "url":      entry.get("url") or entry.get("webpage_url", ""),
-            "duration": entry.get("duration"),
+            "url":            entry.get("url") or entry.get("webpage_url", ""),
+            "duration":       entry.get("duration"),
+            # Metadata available from the RSS/playlist context — may not be
+            # retrievable later when yt-dlp fetches a raw audio enclosure URL.
+            "description":    entry.get("description"),
+            "upload_date":    _parse_upload_date(entry.get("upload_date")),
+            "season_number":  int(entry["season_number"]) if entry.get("season_number") is not None else None,
+            "episode_number": int(entry["episode_number"]) if entry.get("episode_number") is not None else None,
         })
     return result
 
 
 def _parse_upload_date(raw: str | None) -> str | None:
     # yt-dlp returns "YYYYMMDD" → convert to ISO "YYYY-MM-DD"
-    if raw and len(raw) == 8 and raw.isdigit():
+    if raw is None:
+        return None
+    if len(raw) == 8 and raw.isdigit():
         return f"{raw[:4]}-{raw[4:6]}-{raw[6:]}"
+    ui.warning(f"Unexpected upload_date format from yt-dlp: {raw!r} — skipping")
     return None
 
 

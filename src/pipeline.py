@@ -60,6 +60,7 @@ def ingest(
     force: bool = False,
     initial_prompt: str | None = None,
     on_progress: Callable[[dict], None] = lambda _: None,
+    prefetched_metadata: dict | None = None,
 ) -> None:
     """
     Full ingest pipeline for a single audio URL:
@@ -154,6 +155,22 @@ def ingest(
     # ── 1. Download ──────────────────────────────────────────────────────────
     on_progress({"step": 1, "total": INGEST_STEPS, "label": LABEL_DOWNLOAD, "status": "running"})
     audio_info = downloader.download_audio(url, AUDIO_DIR, force=force)
+
+    # For playlist items, yt-dlp may not return metadata (description, dates,
+    # season/episode numbers) when fetching a raw audio enclosure URL. Fill in
+    # any missing fields from the pre-fetched RSS/playlist entry if provided.
+    if prefetched_metadata is not None:
+        for key in ("description", "upload_date", "season_number", "episode_number"):
+            if audio_info.get(key) is None:
+                audio_info[key] = prefetched_metadata.get(key)
+        # Always prefer the RSS/playlist title over what yt-dlp resolves.
+        # prefetched_metadata is only set for playlist items — in that context
+        # the RSS title is always the human-readable episode title, while yt-dlp
+        # resolving a raw audio enclosure URL may return a garbage string (raw ID,
+        # full URL, etc.) that is not useful.
+        if prefetched_metadata.get("title"):
+            audio_info["title"] = prefetched_metadata["title"]
+
     on_progress({"step": 1, "total": INGEST_STEPS, "label": LABEL_DOWNLOAD, "status": "done", "detail": audio_info["title"]})
 
     # ── 2. Transcribe ────────────────────────────────────────────────────────

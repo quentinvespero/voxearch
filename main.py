@@ -145,6 +145,7 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
 
     if entries is None:
         # Single item — original behaviour unchanged
+        items_to_process = None
         urls_to_process = [args.url]
     else:
         if args.yes:
@@ -155,7 +156,8 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
             if selected_indices is None:
                 ui.info("Aborted.")
                 return
-        urls_to_process = [entries[i]["url"] for i in selected_indices]
+        items_to_process = [entries[i] for i in selected_indices]
+        urls_to_process = [e["url"] for e in items_to_process]
 
     # ── Process each URL ──────────────────────────────────────────────────────
     failures: list[tuple[str, Exception]] = []
@@ -164,6 +166,10 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
             ui.console.print(
                 f"\n[bold cyan][{i}/{len(urls_to_process)}][/bold cyan] Processing…"
             )
+        # For playlist items, pass the pre-fetched entry metadata so the pipeline
+        # can fill in fields (season, episode, description) that yt-dlp cannot
+        # extract from a raw audio enclosure URL.
+        prefetched = items_to_process[i - 1] if items_to_process else None
         try:
             ingest(
                 url,
@@ -171,6 +177,7 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
                 force=args.force,
                 initial_prompt=initial_prompt,
                 on_progress=_ProgressHandler(),
+                prefetched_metadata=prefetched,
             )
         except Exception as exc:
             ui.console.print(f"\n[bold red]✗ Failed:[/bold red] {url}\n  [red]{exc}[/red]")

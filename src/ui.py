@@ -33,6 +33,11 @@ def info(msg: str) -> None:
     console.print(f"  [dim]{msg}[/dim]")
 
 
+def warning(msg: str) -> None:
+    """Non-fatal warning shown in yellow."""
+    console.print(f"  [yellow]⚠ {msg}[/yellow]")
+
+
 def skip(msg: str) -> None:
     """Skipped-step indicator."""
     console.print(f"[yellow]\\[skip][/yellow] {msg}")
