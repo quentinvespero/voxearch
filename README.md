@@ -1,22 +1,15 @@
 # Voxearch
 
-A local CLI tool that downloads audio from a URL, transcribes it on-device, and stores the result in a searchable database.
+A local CLI tool that downloads audio from a URL, transcribes it on-device, and stores the result in a searchable database. **Runs entirely locally — no cloud APIs.**
 
-**Runs entirely locally — no cloud APIs or others**
-
-_primarily macOS-compatible for now, but support will expand in the future_
-
-## Features
-
-- Download audio from YouTube, podcast RSS feeds, and [yt-dlp-compatible source](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md)
-- Transcribe using `mlx-whisper` (for apple silicon)
-- Two search modes on transcripts:
-  - **Keyword search** — exact/full-text via SQLite FTS5
-  - **Semantic search** — meaning-based via Qdrant vector database
+- Download from YouTube, podcast RSS feeds, and any [yt-dlp-compatible source](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md)
+- Transcribe using `mlx-whisper` (Apple Silicon)
+- **Keyword search** — exact/full-text via SQLite FTS5
+- **Semantic search** — meaning-based via Qdrant vector database
 
 ## Requirements
 
-- macOS, Apple Silicon (M-series) - _(support will expand in the futur)_
+- macOS, Apple Silicon (M-series) — _(support will expand in the future)_
 - Python 3.11+
 - [uv](https://github.com/astral-sh/uv) (package manager)
 - ffmpeg
@@ -65,14 +58,6 @@ uv run python main.py search keyword "climate" --limit 5
 Results show the source title, timestamp range, and the matching transcript segment.
 
 ## Architecture
-
-```
-Audio URL
-  → yt-dlp          download + convert to MP3
-  → mlx-whisper     transcribe → timestamped segments
-  → SQLite (FTS5)   store segments for keyword search
-  → Qdrant          store embeddings for semantic search
-```
 
 | Layer | Tool |
 |---|---|
