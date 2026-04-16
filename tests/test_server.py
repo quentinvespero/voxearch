@@ -34,6 +34,9 @@ _MOCK_SOURCES = [
         "description": "First episode",
         "status": "complete",
         "added_at": "2024-01-15 10:00:00",
+        "upload_date": None,
+        "season_number": None,
+        "episode_number": None,
     }
 ]
 
@@ -203,10 +206,10 @@ class TestIngestEndpoint:
 
     def _mock_pipeline(self, on_progress_events: list[dict], *, raises: Exception | None = None):
         """Return a side_effect function for pipeline.ingest that drives on_progress."""
-        def _ingest(url, language, force, initial_prompt, on_progress, auto_context):
+        def _ingest(url, language, force, initial_prompt, on_progress, auto_context, **kwargs):
             for ev in on_progress_events:
                 on_progress(ev)
-            if raises:
+            if raises is not None:
                 raise raises
         return _ingest
 
@@ -294,4 +297,21 @@ class TestSearchKeywordDbError:
             side_effect=Exception("DB unavailable"),
         ):
             response = error_client.get("/search/keyword?q=test")
+        assert response.status_code == 500
+
+
+# ── GET /search/semantic — DB error ───────────────────────────────────────────
+
+class TestSearchSemanticDbError:
+    def test_vector_store_error_returns_500(self, error_client):
+        # Embedding succeeds; vector_store.search_semantic fails (unhandled → 500)
+        mock_vector = [0.1] * 384
+        with (
+            patch("src.server.embedder.embed_texts", return_value=[mock_vector]),
+            patch(
+                "src.server.vector_store.search_semantic",
+                side_effect=Exception("Qdrant unavailable"),
+            ),
+        ):
+            response = error_client.get("/search/semantic?q=test")
         assert response.status_code == 500
