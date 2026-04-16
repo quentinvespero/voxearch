@@ -9,6 +9,7 @@ from src.database.sqlite_store import (
     mark_source_complete,
     get_source_id_by_url,
     get_source_by_id,
+    delete_source,
     delete_source_by_id,
     get_segments_by_source_id,
     list_sources,
@@ -256,9 +257,9 @@ class TestSearchKeyword:
 
     def test_respects_limit(self, db_with_source):
         db, _ = db_with_source
-        # "machine" only matches 1, but let's add a broader query then limit to 1
+        # All 3 segments match, but limit=1 must return exactly 1
         results = search_keyword(db, "Hello OR podcast OR machine", limit=1)
-        assert len(results) <= 1
+        assert len(results) == 1
 
     def test_result_has_source_info(self, db_with_source):
         db, _ = db_with_source
@@ -276,3 +277,62 @@ class TestSearchKeyword:
         except Exception:
             pass  # FTS syntax error is fine — what matters is that the data survives
         assert list_sources(db) != [], "sources table must survive a malicious query string"
+
+
+# ── delete_source (by URL) ────────────────────────────────────────────────────
+
+class TestDeleteSource:
+    def test_source_gone_after_delete(self, db_with_source):
+        db, source_id = db_with_source
+        delete_source(db, "https://example.com/episode1")
+        assert get_source_by_id(db, source_id) is None
+
+    def test_cascades_to_segments(self, db_with_source):
+        db, source_id = db_with_source
+        delete_source(db, "https://example.com/episode1")
+        assert get_segments_by_source_id(db, source_id) == []
+
+    def test_unknown_url_is_noop(self, db):
+        # Deleting a non-existent URL must not raise — passing without exception is the assertion
+        delete_source(db, "https://never-inserted.com")
+
+
+# ── insert_source_with_segments — optional NULL fields ────────────────────────
+
+class TestInsertWithNullOptionalFields:
+    def test_null_fields_round_trip(self, db):
+        source_id, _ = insert_source_with_segments(
+            db, "No Metadata", "https://ex.com/nulls", None, None, None, None, []
+        )
+        row = get_source_by_id(db, source_id)
+        assert row is not None
+        assert row["description"] is None
+        assert row["upload_date"] is None
+        assert row["season_number"] is None
+        assert row["episode_number"] is None
+
+
+# ── FTS UPDATE trigger (segments_au) ─────────────────────────────────────────
+
+class TestFtsUpdateTrigger:
+    def test_fts_reflects_updated_segment_text(self, db_with_source):
+        db, source_id = db_with_source
+        segs = get_segments_by_source_id(db, source_id)
+        seg_id = segs[0]["id"]  # text is "Hello world"
+
+        # Update the segment text directly (no public API for this)
+        conn = sqlite3.connect(db)
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute(
+            "UPDATE segments SET text = 'Completely different content' WHERE id = ?",
+            (seg_id,),
+        )
+        conn.commit()
+        conn.close()
+
+        # Old text must no longer be findable via FTS
+        assert search_keyword(db, "Hello") == []
+        # New text must be indexed
+        results = search_keyword(db, "Completely")
+        assert len(results) == 1
+        assert results[0]["text"] == "Completely different content"

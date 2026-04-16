@@ -16,6 +16,14 @@ def client():
         yield c
 
 
+@pytest.fixture
+def error_client():
+    # raise_server_exceptions=False converts unhandled exceptions into 500 responses
+    # instead of re-raising them in the test process — needed to assert on 500 status codes
+    with TestClient(app, raise_server_exceptions=False) as c:
+        yield c
+
+
 # ── Shared mock data ──────────────────────────────────────────────────────────
 
 _MOCK_SOURCES = [
@@ -246,3 +254,44 @@ class TestIngestEndpoint:
         assert len(parsed) == 1
         assert parsed[0]["type"] == "error"
         assert "download failed" in parsed[0]["data"]["message"]
+
+    def test_language_param_forwarded_to_pipeline(self, client):
+        mock_ingest = MagicMock()
+        with patch("src.server.pipeline.ingest", mock_ingest):
+            client.post("/ingest", json={"url": "https://example.com/ep1", "language": "fr"})
+        mock_ingest.assert_called_once()
+        # language is the second positional arg (index 1)
+        assert mock_ingest.call_args.args[1] == "fr"
+
+    def test_force_param_forwarded_to_pipeline(self, client):
+        mock_ingest = MagicMock()
+        with patch("src.server.pipeline.ingest", mock_ingest):
+            client.post("/ingest", json={"url": "https://example.com/ep1", "force": True})
+        mock_ingest.assert_called_once()
+        # force is the third positional arg (index 2)
+        assert mock_ingest.call_args.args[2] is True
+
+    def test_default_params_forwarded_to_pipeline(self, client):
+        # When optional params are omitted, defaults from IngestRequest must reach the pipeline
+        mock_ingest = MagicMock()
+        with patch("src.server.pipeline.ingest", mock_ingest):
+            client.post("/ingest", json={"url": "https://example.com/ep1"})
+        mock_ingest.assert_called_once()
+        args = mock_ingest.call_args.args
+        kwargs = mock_ingest.call_args.kwargs
+        assert args[1] is None       # language defaults to None
+        assert args[2] is False      # force defaults to False
+        assert args[3] is None       # initial_prompt defaults to None
+        assert kwargs["auto_context"] is True  # auto_context defaults to True
+
+
+# ── GET /search/keyword — DB error ────────────────────────────────────────────
+
+class TestSearchKeywordDbError:
+    def test_db_error_returns_500(self, error_client):
+        with patch(
+            "src.server.sqlite_store.search_keyword",
+            side_effect=Exception("DB unavailable"),
+        ):
+            response = error_client.get("/search/keyword?q=test")
+        assert response.status_code == 500
